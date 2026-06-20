@@ -48,10 +48,6 @@
                     [k v]))))
         nodes))
 
-(defn- section
-  [tag netlist]
-  (child tag netlist))
-
 (defn- libsource
   [component]
   (when-let [source (child 'libsource component)]
@@ -67,25 +63,29 @@
 
 (defn- component
   [node]
-  (let [fields-node (child 'fields node)]
+  (let [fields-node (child 'fields node)
+        libsource (libsource node)
+        sheetpath (sheetpath node)
+        tstamps (child-value 'tstamps node)]
     (cond-> {:component/ref (child-value 'ref node)
              :component/value (child-value 'value node)
              :component/footprint (child-value 'footprint node)
              :component/description (child-value 'description node)
              :component/fields (entries field-value (children 'field fields-node))
              :component/properties (entries named-value (children 'property node))}
-      (libsource node) (assoc :component/libsource (libsource node))
-      (sheetpath node) (assoc :component/sheetpath (sheetpath node))
-      (child-value 'tstamps node) (assoc :component/tstamps (child-value 'tstamps node)))))
+      libsource (assoc :component/libsource libsource)
+      sheetpath (assoc :component/sheetpath sheetpath)
+      tstamps (assoc :component/tstamps tstamps))))
 
 (defn parse-components
   [netlist-text]
   (let [netlist (edn/read-string netlist-text)]
-    (mapv component (children 'comp (section 'components netlist)))))
+    (mapv component (children 'comp (child 'components netlist)))))
 
-(defn- attribute-entity
-  [component-ref source [name value]]
-  (when (some? value)
+(defn- attribute-entities
+  [component-ref source entries]
+  (for [[name value] entries
+        :when (some? value)]
     {:attribute/id (str component-ref ":" source ":" name)
      :attribute/component [:component/ref component-ref]
      :attribute/source source
@@ -97,10 +97,9 @@
     fields :component/fields
     properties :component/properties
     :as component}]
-  (let [attributes (concat
-                    (map #(attribute-entity component-ref "field" %) fields)
-                    (map #(attribute-entity component-ref "property" %) properties))
-        attributes (vec (keep identity attributes))]
+  (let [attributes (vec (concat
+                         (attribute-entities component-ref "field" fields)
+                         (attribute-entities component-ref "property" properties)))]
     (cons (assoc component :component/attribute (mapv #(vector :attribute/id (:attribute/id %)) attributes))
           attributes)))
 
