@@ -1,0 +1,8 @@
+[tools]
+java = "temurin-25"
+clojure = "1.12.4.1618"
+"github:clj-kondo/clj-kondo" = "2026.04.15"
+"github:weavejester/cljfmt" = "0.16.4"
+
+[tool_alias]
+clojure = "https://github.com/asdf-community/asdf-clojure.git"

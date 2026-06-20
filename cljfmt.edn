@@ -1,0 +1,3 @@
+{:sort-ns-references? true
+ :remove-consecutive-blank-lines? true
+ :normalize-newlines-at-file-end? true}

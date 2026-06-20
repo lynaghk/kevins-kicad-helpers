@@ -1,0 +1,9 @@
+/.clj-kondo/.cache/
+/.lsp/.cache/
+/.nrepl-port
+/.cpcache/
+/.shadow-cljs/
+/target/
+/resources/public/js/
+/resources/public/style.css
+/resources/public/style.css.map

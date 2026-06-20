@@ -1,0 +1,16 @@
+{:paths ["src"]
+
+ :deps {org.clojure/clojure {:mvn/version "1.12.4"}
+        datascript/datascript {:mvn/version "1.7.6"}}
+
+ :aliases
+ {:dev
+  {:extra-paths ["dev" "test"]
+   :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                nubank/matcher-combinators {:mvn/version "3.10.0"}}}
+
+  :test
+  {:extra-paths ["test"]
+   :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                nubank/matcher-combinators {:mvn/version "3.10.0"}}
+   :main-opts ["-m" "kaocha.runner"]}}}
