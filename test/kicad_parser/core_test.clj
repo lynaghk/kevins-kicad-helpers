@@ -16,54 +16,127 @@
          (fields
            (field (name \"Used\") \"Yes\")
            (field (name \"Voltage\") \"100V\")
+           (field (name \"FT Rotation Offset\") \"180\")
            (field (name \"Datasheet\")))
          (libsource
            (lib \"pio-dblib\")
            (part \"Capacitors/101-00002\")
            (description \"CAP CER 10000PF 100V C0G 1206\"))
          (property (name \"Used\") (value \"Yes\"))
+         (property (name \"FT Rotation Offset\") (value \"180\"))
+         (property (name \"ki_fp_filters\") (value \"C_1206*\"))
          (property (name \"Sheetfile\") (value \"eye-spy.kicad_sch\"))
          (sheetpath (names \"/\") (tstamps \"/\"))
-         (tstamps \"5f9eda4b-f430-40d8-9c73-60ef2b2cec89\")))
-     (nets))")
+         (tstamps \"5f9eda4b-f430-40d8-9c73-60ef2b2cec89\"))
+       (comp
+         (ref \"U1\")
+         (value \"MCU\")
+         (footprint \"Package_QFP:LQFP-48\")
+         (libsource
+           (lib \"MCU_Microchip_ATmega\")
+           (part \"ATmega32U4-A\"))))
+     (nets
+       (net
+         (code \"1\")
+         (name \"/RESET\")
+         (node
+           (ref \"C1\")
+           (pin \"1\")
+           (pinfunction \"1\")
+           (pintype \"passive\"))
+         (node
+           (ref \"U1\")
+           (pin \"13\")
+           (pinfunction \"~{RESET}\")
+           (pintype \"input\")))
+       (net
+         (code \"2\")
+         (name \"GND\")
+         (node
+           (ref \"C1\")
+           (pin \"2\")
+           (pinfunction \"2\")
+           (pintype \"passive\")))))")
 
-(deftest parse-components-test
-  (is (= [{:component/ref "C1"
-           :component/value "10nF"
-           :component/footprint "pio-footprints:CAPC320X160X180L55N"
-           :component/description "CAP CER 10000PF 100V C0G 1206"
-           :component/fields {"Used" "Yes"
-                              "Voltage" "100V"
-                              "Datasheet" nil}
-           :component/properties {"Used" "Yes"
-                                  "Sheetfile" "eye-spy.kicad_sch"}
-           :component/libsource {:lib "pio-dblib"
-                                 :part "Capacitors/101-00002"
-                                 :description "CAP CER 10000PF 100V C0G 1206"}
-           :component/sheetpath {:names "/"
-                                 :tstamps "/"}
-           :component/tstamps "5f9eda4b-f430-40d8-9c73-60ef2b2cec89"}]
-         (kicad/parse-components sample-netlist))))
+(deftest parse-netlist-test
+  (is (= {:symbols [{:symbol/id "pio-dblib:Capacitors/101-00002"
+                     :symbol/lib "pio-dblib"
+                     :symbol/part "Capacitors/101-00002"
+                     :symbol/description "CAP CER 10000PF 100V C0G 1206"}
+                    {:symbol/id "MCU_Microchip_ATmega:ATmega32U4-A"
+                     :symbol/lib "MCU_Microchip_ATmega"
+                     :symbol/part "ATmega32U4-A"}]
+          :instances [{:instance/ref "C1"
+                       :instance/value "10nF"
+                       :instance/footprint "pio-footprints:CAPC320X160X180L55N"
+                       :instance/description "CAP CER 10000PF 100V C0G 1206"
+                       :instance/symbol [:symbol/id "pio-dblib:Capacitors/101-00002"]
+                       :instance/attributes [{:attribute/name "Used"
+                                              :attribute/value "Yes"}
+                                             {:attribute/name "Voltage"
+                                              :attribute/value "100V"}
+                                             {:attribute/name "FT Rotation Offset"
+                                              :attribute/value "180"}]
+                       :instance/sheetpath "/"
+                       :instance/pins [{:pin/number "1"
+                                        :pin/function "1"
+                                        :pin/type "passive"}
+                                       {:pin/number "2"
+                                        :pin/function "2"
+                                        :pin/type "passive"}]}
+                      {:instance/ref "U1"
+                       :instance/value "MCU"
+                       :instance/footprint "Package_QFP:LQFP-48"
+                       :instance/symbol [:symbol/id "MCU_Microchip_ATmega:ATmega32U4-A"]
+                       :instance/attributes []
+                       :instance/pins [{:pin/number "13"
+                                        :pin/function "~{RESET}"
+                                        :pin/type "input"}]}]
+          :nets [{:net/name "/RESET"
+                  :net/nodes [{:node/ref "C1"
+                               :node/pin-number "1"}
+                              {:node/ref "U1"
+                               :node/pin-number "13"}]}
+                 {:net/name "GND"
+                  :net/nodes [{:node/ref "C1"
+                               :node/pin-number "2"}]}]}
+         (kicad/parse-netlist sample-netlist))))
 
 (deftest datascript-db-test
   (let [db (kicad/netlist->db sample-netlist)]
-    (testing "components are queryable by reference"
-      (is (= #{["C1" "10nF"]}
+    (testing "instances are queryable by reference"
+      (is (= #{["C1" "10nF"]
+               ["U1" "MCU"]}
              (d/q '[:find ?ref ?value
                     :where
-                    [?e :component/ref ?ref]
-                    [?e :component/value ?value]]
+                    [?e :instance/ref ?ref]
+                    [?e :instance/value ?value]]
                   db))))
 
-    (testing "fields and properties are also attribute entities"
-      (is (= #{["field" "Voltage" "100V"]
-               ["property" "Sheetfile" "eye-spy.kicad_sch"]}
-             (d/q '[:find ?source ?name ?value
+    (testing "fields and properties are collapsed into owned attribute entities"
+      (is (= #{["Voltage" "100V"]
+               ["FT Rotation Offset" "180"]}
+             (d/q '[:find ?name ?value
                     :where
-                    [?component :component/ref "C1"]
-                    [?attribute :attribute/component ?component]
-                    [?attribute :attribute/source ?source]
+                    [?instance :instance/ref "C1"]
+                    [?instance :instance/attribute ?attribute]
                     [?attribute :attribute/name ?name]
                     [?attribute :attribute/value ?value]
-                    [(contains? #{"Voltage" "Sheetfile"} ?name)]]
+                    [(contains? #{"Voltage" "FT Rotation Offset"} ?name)]]
+                  db))))
+
+    (testing "pins are owned by instances"
+      (is (= "13"
+             (:pin/number (kicad/instance-pin db "U1" "13")))))
+
+    (testing "net names are queryable from instance pins"
+      (is (= #{["/RESET"]}
+             (d/q '[:find ?net-name
+                    :where
+                    [?instance :instance/ref "U1"]
+                    [?instance :instance/pin ?pin]
+                    [?pin :pin/number "13"]
+                    [?net :net/node ?node]
+                    [?node :node/pin ?pin]
+                    [?net :net/name ?net-name]]
                   db))))))
