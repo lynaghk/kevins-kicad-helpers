@@ -119,7 +119,7 @@
              (d/q '[:find ?name ?value
                     :where
                     [?instance :instance/ref "C1"]
-                    [?instance :instance/attribute ?attribute]
+                    [?instance :instance/attributes ?attribute]
                     [?attribute :attribute/name ?name]
                     [?attribute :attribute/value ?value]
                     [(contains? #{"Voltage" "FT Rotation Offset"} ?name)]]
@@ -134,9 +134,9 @@
              (d/q '[:find ?net-name
                     :where
                     [?instance :instance/ref "U1"]
-                    [?instance :instance/pin ?pin]
+                    [?instance :instance/pins ?pin]
                     [?pin :pin/number "13"]
-                    [?net :net/node ?node]
+                    [?net :net/nodes ?node]
                     [?node :node/pin ?pin]
                     [?net :net/name ?net-name]]
                   db))))))

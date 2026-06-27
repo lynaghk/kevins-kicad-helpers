@@ -17,16 +17,16 @@
   {:symbol/id {:db/unique :db.unique/identity}
    :instance/ref {:db/unique :db.unique/identity}
    :instance/symbol {:db/valueType :db.type/ref}
-   :instance/attribute {:db/valueType :db.type/ref
-                        :db/cardinality :db.cardinality/many
-                        :db/isComponent true}
-   :instance/pin {:db/valueType :db.type/ref
-                  :db/cardinality :db.cardinality/many
-                  :db/isComponent true}
+   :instance/attributes {:db/valueType :db.type/ref
+                         :db/cardinality :db.cardinality/many
+                         :db/isComponent true}
+   :instance/pins {:db/valueType :db.type/ref
+                   :db/cardinality :db.cardinality/many
+                   :db/isComponent true}
    :net/name {:db/unique :db.unique/identity}
-   :net/node {:db/valueType :db.type/ref
-              :db/cardinality :db.cardinality/many
-              :db/isComponent true}
+   :net/nodes {:db/valueType :db.type/ref
+               :db/cardinality :db.cardinality/many
+               :db/isComponent true}
    :node/pin {:db/valueType :db.type/ref}})
 
 (defn- tagged?
@@ -172,18 +172,11 @@
   [netlist-text]
   (:instances (parse-netlist netlist-text)))
 
-(defn- instance-tx
-  [instance]
-  (-> instance
-      (dissoc :instance/attributes :instance/pins)
-      (assoc :instance/attribute (:instance/attributes instance)
-             :instance/pin (:instance/pins instance))))
-
 (defn- base-tx
   [{:keys [symbols instances]}]
   (concat
    (keep identity symbols)
-   (map instance-tx instances)))
+   instances))
 
 (defn instance-pin
   [db instance-ref pin-number]
@@ -191,7 +184,7 @@
                            :in $ ?ref ?pin-number
                            :where
                            [?instance :instance/ref ?ref]
-                           [?instance :instance/pin ?pin]
+                           [?instance :instance/pins ?pin]
                            [?pin :pin/number ?pin-number]]
                          db instance-ref pin-number)]
     (d/entity db pin-id)))
@@ -207,7 +200,7 @@
 (defn- net-tx
   [db {:net/keys [name nodes]}]
   {:net/name name
-   :net/node (mapv #(resolved-net-node db %) nodes)})
+   :net/nodes (mapv #(resolved-net-node db %) nodes)})
 
 (defn netlist-data->db
   [netlist-data]
@@ -293,19 +286,15 @@
   [schematic-path]
   (netlist->db (export-netlist schematic-path)))
 
-(defn -main
-  [& args]
-  (let [[schematic-path] args]
-    (when-not schematic-path
-      (binding [*out* *err*]
-        (println "Usage: clojure -M -m kicad-parser.core path/to/design.kicad_sch"))
-      (System/exit 2))
-    (print (export-netlist schematic-path))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; REPL exploration underneath
+
+(def db
+  (schematic->db "../plate-reader/pcbs/receiver/receiver.kicad_sch"))
 
 (comment
-  (def db
-    (schematic->db "../plate-reader/pcbs/receiver/receiver.kicad_sch"))
+
 
   (d/touch (d/entity db [:instance/ref "U1"]))
 
@@ -316,5 +305,5 @@
 
   (zipmap (range 100) (repeat :foo))
 
-;;
+  ;;
   )
