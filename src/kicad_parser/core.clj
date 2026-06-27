@@ -227,10 +227,6 @@
            (.canExecute file)
            (.getPath file)))))
 
-(defn- successful?
-  [{:keys [exit]}]
-  (zero? exit))
-
 (defn- run-command
   [command]
   (let [process (-> (ProcessBuilder. command)
@@ -241,23 +237,12 @@
     {:exit exit
      :out out}))
 
-(defn- flatpak-kicad?
-  []
-  (successful? (run-command ["flatpak" "info" "org.kicad.KiCad"])))
-
 (defn kicad-cli-command
   []
   (let [os-name (str/lower-case (System/getProperty "os.name"))
-        mac-cli (or (executable? "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")
-                    (executable? "/Applications/KiCad/kicad.app/Contents/MacOS/kicad-cli"))]
-    (cond
-      (and (str/includes? os-name "linux") (flatpak-kicad?))
-      ["flatpak" "run" "--command=kicad-cli" "org.kicad.KiCad"]
-
-      (and (str/includes? os-name "mac") mac-cli)
+        mac-cli (executable? "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")]
+    (if (and (str/includes? os-name "mac") mac-cli)
       [mac-cli]
-
-      :else
       ["kicad-cli"])))
 
 (defn export-netlist
@@ -302,8 +287,17 @@
          :where [[_ :instance/symbol ?s]]}
        db)
 
+  ;;All instances connected to a net (net -> nodes -> pin -> owning instance).
+  (->> (d/q '[:find [?instance ...]
+              :in $ ?net-name
+              :where
+              [?net :net/name ?net-name]
+              [?net :net/nodes ?node]
+              [?node :node/pin ?pin]
+              [?instance :instance/pins ?pin]]
+            db "/scl")
+       (map #(d/entity db %)))
 
-  (zipmap (range 100) (repeat :foo))
 
   ;;
   )
