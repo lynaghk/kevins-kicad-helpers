@@ -3,6 +3,7 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    clojure.pprint
+   [clojure.set :as set]
    [clojure.string :as str]
    [datascript.core :as d]))
 
@@ -219,6 +220,36 @@
   [netlist-text]
   (netlist-data->db (parse-netlist netlist-text)))
 
+(defn- parse-hex
+  [s]
+  (Long/parseLong (str/replace (str/trim s) #"(?i)^0x" "") 16))
+
+(defn parse-i2c-address
+  "Parse an I2C address field value into a sorted set of the 7-bit addresses it
+   covers. Accepts a single hex address (\"0x48\") or an inclusive hex range
+   (\"0x10..0x17\"). Returns nil for blank/nil input. Returning a set means a
+   single part and a range-addressed part compose the same way, e.g. checking
+   that two parts don't overlap is just (empty? (set/intersection a b))."
+  [value]
+  (when-let [s (some-> value str/trim not-empty)]
+    (if-let [[_ from to] (re-matches #"(.+?)\.\.(.+)" s)]
+      (into (sorted-set) (range (parse-hex from) (inc (parse-hex to))))
+      (sorted-set (parse-hex s)))))
+
+(defn i2c-addresses
+  "Map of instance ref -> sorted set of I2C addresses, for every instance that
+   carries an \"i2c\" attribute. Values are parsed with parse-i2c-address."
+  [db]
+  (into (sorted-map)
+        (map (fn [[ref value]] [ref (parse-i2c-address value)]))
+        (d/q '[:find ?ref ?value
+               :where
+               [?instance :instance/ref ?ref]
+               [?instance :instance/attributes ?attribute]
+               [?attribute :attribute/name "i2c"]
+               [?attribute :attribute/value ?value]]
+             db)))
+
 (defn- executable?
   [path]
   (when path
@@ -298,6 +329,18 @@
             db "/scl")
        (map #(d/entity db %)))
 
+  ;; I2C addresses per instance, parsed from the "i2c" field (single or range).
+  (i2c-addresses db)
+  ;; => {"U1" #{0x48} "U2" #{0x17} "U3" #{0x10}}
+
+  ;; Any two parts whose address sets overlap (range-aware) clash on the bus.
+  (let [addrs (i2c-addresses db)]
+    (for [[a sa] addrs
+          [b sb] addrs
+          :when (and (neg? (compare a b))
+                     (seq (set/intersection sa sb)))]
+      [a b (set/intersection sa sb)]))
+  ;; => () when all distinct
 
   ;;
   )
