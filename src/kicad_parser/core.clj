@@ -98,11 +98,38 @@
     "ki_fp_filters"
     "ki_keywords"})
 
+(defn- parse-hex
+  [s]
+  (Long/parseLong (str/replace (str/trim s) #"(?i)^0x" "") 16))
+
+(defn parse-i2c-address
+  "Parse an I2C address field value into a sorted set of the 7-bit addresses it
+   covers. Accepts a single hex address (\"0x48\") or an inclusive hex range
+   (\"0x10..0x17\"). Returns nil for blank/nil input. Returning a set means a
+   single part and a range-addressed part compose the same way, e.g. checking
+   that two parts don't overlap is just (empty? (set/intersection a b))."
+  [value]
+  (when-let [s (some-> value str/trim not-empty)]
+    (if-let [[_ from to] (re-matches #"(.+)\.\.(.+)" s)]
+      (into (sorted-set) (range (parse-hex from)
+                                (parse-hex to)))
+      (sorted-set (parse-hex s)))))
+
+(def ^:private attribute-parsers
+  "Per-attribute value parsers applied once at import time, so queries can use
+   the typed value directly instead of re-parsing the raw string each time."
+  {"max_mA" parse-double
+   "i2c"    parse-i2c-address})
+
 (defn- attribute
   [[name value]]
   (when (some? value)
-    {:attribute/name name
-     :attribute/value value}))
+    (let [parse (attribute-parsers name)]
+      (if-some [parsed (if parse (parse value) value)]
+        {:attribute/name name
+         :attribute/value parsed}
+        (binding [*out* *err*]
+          (println (format "Skipping unparseable attribute %s=%s" name (pr-str value))))))))
 
 (defn- attributes
   [node]
@@ -220,28 +247,12 @@
   [netlist-text]
   (netlist-data->db (parse-netlist netlist-text)))
 
-(defn- parse-hex
-  [s]
-  (Long/parseLong (str/replace (str/trim s) #"(?i)^0x" "") 16))
-
-(defn parse-i2c-address
-  "Parse an I2C address field value into a sorted set of the 7-bit addresses it
-   covers. Accepts a single hex address (\"0x48\") or an inclusive hex range
-   (\"0x10..0x17\"). Returns nil for blank/nil input. Returning a set means a
-   single part and a range-addressed part compose the same way, e.g. checking
-   that two parts don't overlap is just (empty? (set/intersection a b))."
-  [value]
-  (when-let [s (some-> value str/trim not-empty)]
-    (if-let [[_ from to] (re-matches #"(.+?)\.\.(.+)" s)]
-      (into (sorted-set) (range (parse-hex from) (inc (parse-hex to))))
-      (sorted-set (parse-hex s)))))
-
 (defn i2c-addresses
   "Map of instance ref -> sorted set of I2C addresses, for every instance that
-   carries an \"i2c\" attribute. Values are parsed with parse-i2c-address."
+   carries an \"i2c\" attribute. Values are parsed at import (see
+   attribute-parsers / parse-i2c-address)."
   [db]
   (into (sorted-map)
-        (map (fn [[ref value]] [ref (parse-i2c-address value)]))
         (d/q '[:find ?ref ?value
                :where
                [?instance :instance/ref ?ref]
@@ -303,6 +314,32 @@
   (netlist->db (export-netlist schematic-path)))
 
 
+(defn instances
+  [db]
+  (->> (d/q '{:find [[?eid ...]]
+              :where [[?eid :instance/ref _]]}
+            db)
+       (map (partial d/entity db))))
+
+
+(defn instance-attribute
+  ([instance k]
+   (->> (:instance/attributes instance)
+        (keep (fn [{:attribute/keys [name value]}]
+                (when (= name k)
+                  value)))
+        first))
+
+  ([instance k not-found]
+   (if-some [v (instance-attribute instance k)]
+     v
+     not-found)))
+
+(defn instance-part
+  [instance]
+  (-> instance :instance/symbol :symbol/part))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; REPL exploration underneath
 
@@ -311,8 +348,38 @@
 
 (comment
 
+  (->> (instances db)
+       (filter #(.startsWith (:instance/ref %) "U"))
+       (sort-by instance-part)
+       (map (fn [i]
+              {:part (instance-part i)
+               :mA (instance-attribute i "max_mA")}))
+       clojure.pprint/print-table)
+
+
+  ;; Current draw grouped by part, with instance count and total (count x mA).
+  ;; Uncomment the starts-with clause to restrict to "U" refs.
+  (let [round (fn [x] (/ (Math/round (* 1000.0 x)) 1000.0))
+        rows  (->> (d/q '{:find  [?part ?mA (count ?i)]
+                          :where [[?i :instance/ref ?ref]
+                                  ;; [(clojure.string/starts-with? ?ref "U")]
+                                  [?i :instance/symbol ?sym]
+                                  [?sym :symbol/part ?part]
+                                  [?i :instance/attributes ?attr]
+                                  [?attr :attribute/name "max_mA"]
+                                  [?attr :attribute/value ?mA]]}
+                        db)
+                   (sort-by first)
+                   (map (fn [[part mA cnt]]
+                          {:part part :count cnt :mA mA :total_mA (round (* cnt mA))})))]
+    (clojure.pprint/print-table [:part :count :mA :total_mA] rows)
+    (println (format "Total: %.2f mA" (reduce + (map :total_mA rows)))))
+
+  (instance-attribute (first (instances db))
+                      "max_mA")
 
   (d/touch (d/entity db [:instance/ref "U1"]))
+
 
   (d/q '{:find [?s]
          :where [[_ :instance/symbol ?s]]}
