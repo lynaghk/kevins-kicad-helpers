@@ -248,18 +248,71 @@
   (netlist-data->db (parse-netlist netlist-text)))
 
 (defn i2c-addresses
-  "Map of instance ref -> sorted set of I2C addresses, for every instance that
-   carries an \"i2c\" attribute. Values are parsed at import (see
-   attribute-parsers / parse-i2c-address)."
   [db]
-  (into (sorted-map)
-        (d/q '[:find ?ref ?value
-               :where
-               [?instance :instance/ref ?ref]
-               [?instance :instance/attributes ?attribute]
-               [?attribute :attribute/name "i2c"]
-               [?attribute :attribute/value ?value]]
-             db)))
+  (d/q '{:find [?hex-addr (distinct ?ref)]
+         :where [[?instance :instance/ref ?ref]
+                 [?instance :instance/attributes ?attribute]
+                 [?attribute :attribute/name "i2c"]
+                 [?attribute :attribute/value ?addrs]
+                 [(clojure.core/identity ?addrs) [?addr ...]]
+                 [(clojure.core/format "0x%x" ?addr) ?hex-addr]]}
+       db))
+
+
+(defn check-i2c!
+  [db]
+  (let [refs-by-addr (i2c-addresses db)]
+
+    (clojure.pprint/print-table (sort-by :addr (for [[addr refs] refs-by-addr]
+                                                 {:addr addr :refs (clojure.string/join " "  (sort refs))})))
+
+    (doseq [[addr refs] refs-by-addr
+            :when (< 1 (count refs))]
+      (throw (ex-info (str "Addr " addr " matches multiple refs: " refs))))))
+
+
+(def ^:private capacitance-multipliers
+  {"p" 1e-12 "n" 1e-9 "u" 1e-6 "µ" 1e-6 "m" 1e-3 "" 1.0})
+
+(defn parse-capacitance
+  "Parse a capacitor value string like \"100nF\"/\"1uF\"/\"4.7µF\" into farads.
+   Returns nil for blank/nil/unparseable input."
+  [s]
+  (when s
+    (when-let [[_ n u] (re-matches #"(?i)\s*([0-9.]+)\s*([pnuµm]?)f?\s*" s)]
+      (* (Double/parseDouble n) (capacitance-multipliers (str/lower-case u))))))
+
+(defn net-capacitance
+  "Total capacitance (farads) of every C* capacitor with a pin on `net-name`.
+   Values are parsed from each capacitor's :instance/value (see parse-capacitance)."
+  [db net-name]
+  (some->> (d/q '{:find  [?ref ?v]
+                  :in    [$ ?net]
+                  :where [[?n :net/name ?net]
+                          [?n :net/nodes ?node]
+                          [?node :node/pin ?pin]
+                          [?i :instance/pins ?pin]
+                          [?i :instance/ref ?ref]
+                          [(clojure.string/starts-with? ?ref "C")]
+                          [?i :instance/value ?v]]}
+                db net-name)
+           (keep (comp parse-capacitance second))
+           seq
+           (reduce + 0.0)))
+
+
+(defn check-total-capacitance!
+  [db]
+  (let [rows (->> ["VCC" "VBUS"] ;;TODO: make this configurable
+                  (keep (fn [net]
+                          (when-let [c (net-capacitance db net)]
+                            {:net net :total-uF (format "%.2f" (* c 1e6))}))))]
+
+    (clojure.pprint/print-table rows)
+
+    (doseq [{:keys [net total-uF]} rows]
+      (assert (< (Double/parseDouble total-uF) 10) (str "Net " net " exceeds USB spec 10uF capacitance")))))
+
 
 (defn- executable?
   [path]
@@ -340,27 +393,9 @@
   (-> instance :instance/symbol :symbol/part))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; REPL exploration underneath
-
-(def db
-  (schematic->db "../plate-reader/pcbs/receiver/receiver.kicad_sch"))
-
-(comment
-
-  (->> (instances db)
-       (filter #(.startsWith (:instance/ref %) "U"))
-       (sort-by instance-part)
-       (map (fn [i]
-              {:part (instance-part i)
-               :mA (instance-attribute i "max_mA")}))
-       clojure.pprint/print-table)
-
-
-  ;; Current draw grouped by part, with instance count and total (count x mA).
-  ;; Uncomment the starts-with clause to restrict to "U" refs.
-  (let [round (fn [x] (/ (Math/round (* 1000.0 x)) 1000.0))
-        rows  (->> (d/q '{:find  [?part ?mA (count ?i)]
+(defn check-power!
+  [db]
+  (let [rows  (->> (d/q '{:find  [?part ?mA (count ?i)]
                           :where [[?i :instance/ref ?ref]
                                   ;; [(clojure.string/starts-with? ?ref "U")]
                                   [?i :instance/symbol ?sym]
@@ -371,23 +406,81 @@
                         db)
                    (sort-by first)
                    (map (fn [[part mA cnt]]
-                          {:part part :count cnt :mA mA :total_mA (round (* cnt mA))})))]
-    (clojure.pprint/print-table [:part :count :mA :total_mA] rows)
-    (println (format "Total: %.2f mA" (reduce + (map :total_mA rows)))))
+                          {:part part
+                           :count cnt
+                           :mA (format "%.2f" mA)
+                           :total (format "%.2f" (* cnt mA))})))
+        table-str (with-out-str (clojure.pprint/print-table [:part :count :mA :total] rows))
+        table-width (->> (clojure.string/split table-str  #"\n") second count)
+        total-ma (reduce + (map #(Double/parseDouble (:total %)) rows))]
+
+    ;; TODO: make this configurable
+    (assert (<= total-ma 300))
+
+    (print table-str)
+    (println (apply str (repeat table-width "-")))
+    (println (format "Total: %.2f mA" total-ma))))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Reporting
+
+
+(defn check-schematic!
+  [schematic]
+  (let [db (schematic->db schematic)]
+
+    (print "ic power")
+    (check-power! db)
+
+    (println "")
+    (print "i2c addresses")
+    (check-i2c! db)
+
+    (println "")
+    (println "total capacitance:")
+    (check-total-capacitance! db)
+
+    ;;
+    ))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; REPL exploration underneath
+
+(comment
+
+  (check-schematic!  "../plate-reader/pcbs/receiver/receiver.kicad_sch")
+
+  (def db
+    (schematic->db "../plate-reader/pcbs/receiver/receiver.kicad_sch"))
+
+  (def db
+    (schematic->db "../plate-reader/pcbs/emitter/emitter.kicad_sch"))
+
+  (i2c-addresses db)
+
+  (d/touch (d/entity db [:instance/ref "U1"]))
+
+  (->> (instances db)
+       (filter #(.startsWith (:instance/ref %) "U"))
+       (sort-by instance-part)
+       (map (fn [i]
+              {:part (instance-part i)
+               :mA (instance-attribute i "max_mA")}))
+       clojure.pprint/print-table)
+
+  ;; Current draw grouped by part, with instance count and total (count x mA).
+  ;; Uncomment the starts-with clause to restrict to "U" refs.
 
   (instance-attribute (first (instances db))
                       "max_mA")
 
-  (d/touch (d/entity db [:instance/ref "U1"]))
-
-
-  (d/q '{:find [?s]
-         :where [[_ :instance/symbol ?s]]}
-       db)
-
   ;;All instances connected to a net (net -> nodes -> pin -> owning instance).
   (->> (d/q '[:find [?instance ...]
-              :in $ ?net-name
+              :in $ ?net-namen
               :where
               [?net :net/name ?net-name]
               [?net :net/nodes ?node]
@@ -396,18 +489,14 @@
             db "/scl")
        (map #(d/entity db %)))
 
-  ;; I2C addresses per instance, parsed from the "i2c" field (single or range).
-  (i2c-addresses db)
-  ;; => {"U1" #{0x48} "U2" #{0x17} "U3" #{0x10}}
+  ;; Total capacitance (farads) on a power net: sums every C* capacitor with a
+  ;; pin on the net, parsing values like "100nF"/"1uF" to farads.
+  (net-capacitance db "VCC")
+  ;; => 6.41e-6
+  (into (sorted-map)
+        (for [net ["VCC" "VBUS" "foooo"]]
+          [net (format "%.3f µF" (* 1e6 (net-capacitance db net)))]))
+  ;; => {"VBUS" "0.000 µF", "VCC" "6.410 µF"}
 
-  ;; Any two parts whose address sets overlap (range-aware) clash on the bus.
-  (let [addrs (i2c-addresses db)]
-    (for [[a sa] addrs
-          [b sb] addrs
-          :when (and (neg? (compare a b))
-                     (seq (set/intersection sa sb)))]
-      [a b (set/intersection sa sb)]))
-  ;; => () when all distinct
-
-  ;;
+;;
   )
