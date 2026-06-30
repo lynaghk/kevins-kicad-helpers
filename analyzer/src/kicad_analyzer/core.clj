@@ -1,4 +1,4 @@
-(ns kicad-parser.core
+(ns kicad-analyzer.core
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
