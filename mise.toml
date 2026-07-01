@@ -1,0 +1,3 @@
+[tools]
+"github:babashka/babashka" = "1.12.218"
+"github:weavejester/cljfmt" = "0.16.4"
