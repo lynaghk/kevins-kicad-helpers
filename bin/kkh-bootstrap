@@ -64,8 +64,12 @@ git submodule update --init --recursive
 
 printf '%s\n' "$BB_EDN" > bb.edn
 if [ -e mise.toml ]; then
-  echo "Note: mise.toml already exists; leaving it. Ensure it adds" >&2
-  echo "      {{config_root}}/vendor/kevins-kicad-helpers/bin to PATH and pins babashka." >&2
+  cat >&2 <<EOF
+Note: mise.toml already exists; leaving it. Merge in the following so it pins
+      babashka and adds the helpers' bin to PATH:
+
+$MISE_TOML
+EOF
 else
   printf '%s\n' "$MISE_TOML" > mise.toml
   touch mise.lock            # mise only maintains the lockfile when it already exists
