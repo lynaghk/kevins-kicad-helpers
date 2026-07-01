@@ -44,4 +44,17 @@ bb build [board] [--force]   # omit board to build all
 
 ## Developing this repo
 
-`bb format` (from this repo root) formats the `project-tasks/` Clojure sources with cljfmt.
+Each tool lives in its own top-level folder (`easyeda-import/`, `dxf-import/`,
+`analyzer/`, `step-export/`, `project-tasks/`) and owns its dev entry points as
+executable stubs under `<tool>/bin/`:
+
+- `bin/test` — run the tool's test suite
+- `bin/format` — format the tool's sources
+
+From the repo root, `bb test` / `bb format` run the matching stub in every folder
+that has one (via `scripts/run-all.bb`) and print a per-tool summary. The stubs
+are language agnostic — bash wrapping `uv run`, cljfmt, `clojure -M:test`,
+whatever — they just have to be executable. A stub exiting with code 125 is
+reported as SKIP without failing the run (e.g. `analyzer/bin/test` when the
+`clojure` CLI isn't installed). To add tests or formatting to a tool, drop in a
+stub; nothing else needs wiring.

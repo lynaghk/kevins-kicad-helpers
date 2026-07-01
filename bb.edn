@@ -1,5 +1,5 @@
 {:tasks
- {format {:doc "Format the project-tasks Clojure sources."
-          :task (shell "scripts/format.bb")}
-  test {:doc "Run every tool's test suite (dxf-import, easyeda-import, analyzer)."
-        :task (shell "scripts/test.bb")}}}
+ {format {:doc "Run bin/format in every tool folder that has one."
+          :task (shell "scripts/run-all.bb format")}
+  test {:doc "Run bin/test in every tool folder that has one."
+        :task (shell "scripts/run-all.bb test")}}}
