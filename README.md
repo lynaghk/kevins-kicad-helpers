@@ -13,8 +13,8 @@ Then:
 ```
 mkdir -p pcbs/<board>        # each board gets its own dir with .kicad_pro/.kicad_sch/.kicad_pcb
 bb list                      # list discovered boards
-bb check <board>             # or: bb check --all
-bb build <board>             # or: bb build --all [--force]
+bb check [board]             # omit board to check all
+bb build [board] [--force]   # omit board to build all
 ```
 
 ## Developing this repo

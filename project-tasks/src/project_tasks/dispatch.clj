@@ -8,10 +8,8 @@
 (def usage
   (str "Usage:\n"
        "  bb list\n"
-       "  bb check <board>\n"
-       "  bb check --all\n"
-       "  bb build <board> [--force]\n"
-       "  bb build --all [--force]"))
+       "  bb check [board]\n"
+       "  bb build [board] [--force]"))
 
 (defn available-boards [projects]
   (str/join "\n" (map #(str "  " (:board-name %)) projects)))
@@ -28,14 +26,13 @@
       (fail-with-projects! "--force may only be specified once." projects))
     (when (and (= action "check") force?)
       (fail-with-projects! "--force is only valid with build." projects))
-    (when-not (= 1 (count targets))
-      (fail-with-projects! (str action " expects exactly one board name or --all.") projects))
+    (when (> (count targets) 1)
+      (fail-with-projects! (str action " accepts at most one board name.") projects))
     (let [target (first targets)]
-      (when (and (str/starts-with? target "--")
-                 (not= "--all" target))
+      (when (and target (str/starts-with? target "--"))
         (fail-with-projects! (str "Unknown argument: " target) projects))
       {:force? force?
-       :all? (= "--all" target)
+       :all? (nil? target)
        :target target})))
 
 (defn select-projects [{:keys [all? target]} projects]
