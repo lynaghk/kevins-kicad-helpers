@@ -1,3 +1,5 @@
 {:tasks
  {format {:doc "Format the project-tasks Clojure sources."
-          :task (shell "scripts/format.bb")}}}
+          :task (shell "scripts/format.bb")}
+  test {:doc "Run every tool's test suite (dxf-import, easyeda-import, analyzer)."
+        :task (shell "scripts/test.bb")}}}
