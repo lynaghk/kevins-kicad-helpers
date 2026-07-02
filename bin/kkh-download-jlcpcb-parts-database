@@ -2,20 +2,17 @@
 #
 # Downloads the JLCPCB parts database and builds a self-contained `components_simplified` table.
 # I browse this with https://sqlitebrowser.org/ and also have LLM agents use it to find potential parts for me.
+#
+# Output is always ./jlcpcb_parts.db (stable path, overwritten each run). The build date lives in
+# a `meta` table inside the DB rather than in the filename or filesystem mtime, so it survives
+# copying/rsync/git. Query it with:  SELECT value FROM meta WHERE key='generated_at';
 
 set -euo pipefail
 
-# Skip if we already built a simplified DB.
-EXISTING=$(ls JLCPCB_*.db 2>/dev/null | head -n 1 || echo "")
-if [ -n "$EXISTING" ]; then
-    echo "Already built, exiting: $EXISTING"
-    exit 0
-fi
-
 DOWNLOAD_URL="https://cdfer.github.io/jlcpcb-parts-database/jlcpcb-components.sqlite3"
-CURRENT_DATE=$(date +"%Y_%m_%d")
-RAW_FILE="jlcpcb-raw_${CURRENT_DATE}.sqlite3"
-OUTPUT_FILE="JLCPCB_${CURRENT_DATE}.db"
+RAW_FILE="jlcpcb-raw.sqlite3"
+OUTPUT_FILE="jlcpcb_parts.db"
+GENERATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 echo "Downloading JLCPCB parts database..."
 curl -L -o "$RAW_FILE" "$DOWNLOAD_URL"
@@ -25,7 +22,23 @@ rm -f "$OUTPUT_FILE" "$OUTPUT_FILE"-*
 sqlite3 "$RAW_FILE" <<EOF 2>&1
 ATTACH DATABASE '${OUTPUT_FILE}' AS out;
 
-CREATE TABLE out.components_simplified AS
+-- Explicit column types so consumers get a real REAL price column (and typed
+-- integer columns) — no CAST(price AS REAL) needed at query time.
+CREATE TABLE out.components_simplified (
+    lcsc        INTEGER,
+    extended    INTEGER,   -- 0 = basic/preferred (fee-free), 1 = extended
+    stock       INTEGER,
+    price       REAL,      -- USD, first (smallest-qty / highest) tier; NULL if unknown
+    mfr         TEXT,      -- manufacturer PART NUMBER (MPN), not the maker's name
+    category    TEXT,
+    subcategory TEXT,
+    package     TEXT,
+    joints      INTEGER,
+    description TEXT,
+    datasheet   TEXT
+);
+
+INSERT INTO out.components_simplified
 SELECT lcsc,
        -- 1 = extended part (incurs per-BOM-line feeding fee at assembly);
        -- 0 = basic/preferred, i.e. effectively fee-free. JLCPCB's basic and
@@ -33,7 +46,16 @@ SELECT lcsc,
        -- collapse both into a single "extended" boolean.
        CASE WHEN basic = 0 AND preferred = 0 THEN 1 ELSE 0 END AS extended,
        stock,
-       ROUND(json_extract(price, '\$[0].price'), 3) AS price,
+       -- price is an upstream JSON array of quantity tiers; [0] is the first
+       -- (smallest-quantity) tier, i.e. the highest unit price you'd pay.
+       -- json_valid() guards against a malformed row aborting the whole build;
+       -- missing/empty/non-numeric prices coerce to NULL (not a bogus 0.0),
+       -- and the REAL column affinity above cements the value as a real number.
+       ROUND(
+         CASE WHEN json_valid(price)
+              THEN json_extract(price, '\$[0].price')
+              ELSE NULL END,
+       3) AS price,
        mfr, category, subcategory, package, joints, description, datasheet
 FROM components
 INNER JOIN categories ON components.category_id = categories.id;
@@ -46,14 +68,24 @@ CREATE INDEX out.idx_cs_extended ON components_simplified (extended);
 CREATE INDEX out.idx_cs_package  ON components_simplified (package);
 CREATE INDEX out.idx_cs_mfr      ON components_simplified (mfr);
 
+-- Build provenance: durable, travels with the DB.
+CREATE TABLE out.meta (key TEXT PRIMARY KEY, value TEXT);
+INSERT INTO out.meta (key, value) VALUES
+  ('generated_at', '${GENERATED_AT}'),
+  ('source_url',   '${DOWNLOAD_URL}'),
+  ('row_count',    (SELECT CAST(COUNT(*) AS TEXT) FROM out.components_simplified));
+
 ANALYZE out;
 EOF
 
 echo "Compacting..."
 sqlite3 "$OUTPUT_FILE" "VACUUM;"
 
+# Drop any old date-suffixed builds from previous versions of this script.
+rm -f JLCPCB_*.db JLCPCB_*.db-* jlcpcb-raw_*.sqlite3 jlcpcb-raw_*.sqlite3-*
+
 # The raw ~1.7 GB download is no longer needed once we've materialized.
 # Comment this out if you want to keep the full upstream DB around.
 rm -f "$RAW_FILE" "$RAW_FILE"-*
 
-echo "Done: $OUTPUT_FILE ($(du -h "$OUTPUT_FILE" | cut -f1))"
+echo "Done: $OUTPUT_FILE ($(du -h "$OUTPUT_FILE" | cut -f1)), generated_at=${GENERATED_AT}"
