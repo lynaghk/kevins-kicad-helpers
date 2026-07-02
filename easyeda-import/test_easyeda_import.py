@@ -23,6 +23,7 @@ import footprint_chooser_tui as tui
 import footprint_matcher as matcher
 import import_easyeda_parts as imp
 import kicad_mod_render as R
+import symbol_matcher as sym
 
 # --------------------------------------------------------------------------- #
 # fixtures: one footprint per dialect (trimmed from real easyeda2kicad output
@@ -392,6 +393,108 @@ def test_package_token():
     assert matcher.package_token("SOT-23-5_L3.0-W1.6-P0.95-LS2.8-BL") == "SOT-23-5"
     assert matcher.package_token("SO-8_L4.9-W3.9-P1.27-LS6.0-BL-EP") == "SO-8"
     assert matcher.package_token("SOT-23-5") == "SOT-23-5"
+    # a `<n>P-` pad-count segment before the dims must not defeat extraction
+    assert matcher.package_token("CRYSTAL-SMD_4P-L3.2-W2.5-BL") == "CRYSTAL-SMD"
+    assert matcher.package_token("SENSOR-TH_6P-L8.5-W8.5-P2.54-LS10.6-TL") == "SENSOR-TH"
+    # no dims at all: fall back to the first _-segment
+    assert matcher.package_token("USB-C-SMD_TYPE-C-16PIN-2MD-073") == "USB-C-SMD"
+
+
+def test_search_tokens_powerpad_and_aliases():
+    # TI PowerPAD spelling and plain SO-8 + -EP flag both expand to the KiCad
+    # exposed-pad names; a plain SO-8 (no EP) must NOT.
+    tokens, _ = matcher._search_tokens("SOPOWERPAD-8", None, "SOPOWERPAD-8_L4.9-W3.9-P1.27-LS6.0-TL-EP")
+    assert "SOIC-8-1EP" in tokens and "PDSO-G8" in tokens
+    tokens, _ = matcher._search_tokens("SO-8", None, "SO-8_L4.9-W3.9-P1.27-LS6.0-BL-EP")
+    assert "SOIC-8-1EP" in tokens and "SOIC-8" in tokens
+    tokens, _ = matcher._search_tokens("SO-8", None, "SO-8_L4.9-W3.9-P1.27-LS6.0-BL")
+    assert "SOIC-8-1EP" not in tokens
+    # cross-naming-scheme aliases
+    tokens, _ = matcher._search_tokens("CRYSTAL-SMD", None, "CRYSTAL-SMD_4P-L3.2-W2.5-BL")
+    assert "Crystal_SMD" in tokens
+    tokens, _ = matcher._search_tokens("USB-C-SMD", None, "USB-C-SMD_TYPE-C-16PIN-2MD-073")
+    assert "USB_C_Receptacle" in tokens
+
+
+# --------------------------------------------------------------------------- #
+# standard-symbol detection (feature: tell the user the import was unnecessary)
+# --------------------------------------------------------------------------- #
+STD_SYMBOL_LIB = """\
+(kicad_symbol_lib
+  (version 20241209)
+  (symbol "AMS1117-3.3"
+    (symbol "AMS1117-3.3_0_1" (rectangle (start -5 5) (end 5 -5)))
+  )
+  (symbol "W25Q128JVS"
+    (symbol "W25Q128JVS_1_1" (rectangle (start -5 5) (end 5 -5)))
+  )
+  (symbol "RP2350A")
+)
+"""
+
+
+def _std_symbol_index() -> dict[str, list[str]]:
+    import os
+
+    root = _TMP / "symroot"
+    root.mkdir(exist_ok=True)
+    (root / "Test_Lib.kicad_sym").write_text(STD_SYMBOL_LIB)
+    orig = os.environ.get("XDG_CACHE_HOME")
+    os.environ["XDG_CACHE_HOME"] = str(_TMP / "cache")
+    try:
+        return sym.load_index(root)
+    finally:
+        if orig is None:
+            os.environ.pop("XDG_CACHE_HOME", None)
+        else:
+            os.environ["XDG_CACHE_HOME"] = orig
+
+
+def test_symbol_index_skips_subunits():
+    index = _std_symbol_index()
+    refs = [r for refs in index.values() for r in refs]
+    assert "Test_Lib:AMS1117-3.3" in refs and "Test_Lib:RP2350A" in refs
+    assert not any("_0_1" in r or "_1_1" in r for r in refs)
+
+
+def test_symbol_match_exact_and_prefix():
+    index = _std_symbol_index()
+    exact = sym.match_mpn("AMS1117-3.3", index)
+    assert exact and exact[0].exact and exact[0].ref == "Test_Lib:AMS1117-3.3"
+    # packaging suffix: the standard name is a prefix of the MPN
+    pref = sym.match_mpn("W25Q128JVSIQTR", index)
+    assert pref and not pref[0].exact and pref[0].ref == "Test_Lib:W25Q128JVS"
+    # unrelated and too-short MPNs match nothing
+    assert sym.match_mpn("DRV8251ADDAR", index) == []
+    assert sym.match_mpn("RP2", index) == []
+
+
+def test_symbol_index_cache_reused_and_invalidated():
+    import json
+    import os
+
+    root = _TMP / "symroot2"
+    root.mkdir(exist_ok=True)
+    lib = root / "Only.kicad_sym"
+    lib.write_text('(kicad_symbol_lib (symbol "PARTONE"))')
+    os.environ["XDG_CACHE_HOME"] = str(_TMP / "cache2")
+    try:
+        first = sym.load_index(root)
+        assert sym.normalize("PARTONE") in first
+        cache_files = list((_TMP / "cache2/kkh-import").glob("symbol-index-*.json"))
+        assert len(cache_files) == 1
+        # poison the cached index: an unchanged library must be served from it
+        data = json.loads(cache_files[0].read_text())
+        data["index"]["CANARY"] = ["Only:CANARY"]
+        cache_files[0].write_text(json.dumps(data))
+        assert "CANARY" in sym.load_index(root)
+        # touching the library invalidates the cache and drops the canary
+        lib.write_text('(kicad_symbol_lib (symbol "PARTONE") (symbol "PARTTWO"))')
+        os.utime(lib, (1, 1))
+        rebuilt = sym.load_index(root)
+        assert "CANARY" not in rebuilt and sym.normalize("PARTTWO") in rebuilt
+    finally:
+        os.environ.pop("XDG_CACHE_HOME", None)
 
 
 def main() -> int:

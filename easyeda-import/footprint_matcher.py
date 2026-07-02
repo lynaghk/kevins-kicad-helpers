@@ -32,9 +32,18 @@ ALIASES: dict[str, list[str]] = {
     "SO-14": ["SOIC-14"],
     "SO-16": ["SOIC-16"],
     "SOP-8": ["SOIC-8"],
+    # EasyEDA package families whose KiCad names share no substring.
+    "CRYSTAL-SMD": ["Crystal_SMD"],
+    "OSC-SMD": ["Oscillator_SMD"],
+    "USB-C-SMD": ["USB_C_Receptacle"],
 }
 
-_DIM_SUFFIX = re.compile(r"^(?P<token>.*?)_[LWPH]\d", re.IGNORECASE)
+# TI-style exposed-pad SOICs: EasyEDA calls them SOPOWERPAD-<n> (or marks the
+# name with an -EP flag); KiCad's equivalents are SOIC-<n>-1EP_* and the
+# Texas_*-PDSO-G<n>_EP* series. HSOP-<n>-1EP covers the ST/NXP naming.
+_POWERPAD = re.compile(r"^SO(?:P(?:OWERPAD)?|IC)?-?(?P<n>\d+)$", re.IGNORECASE)
+
+_DIM_SUFFIX = re.compile(r"^(?P<token>.*?)_(?:\d+P-)?[LWPH]\d", re.IGNORECASE)
 _PASSIVE_CODE = re.compile(r"^(?P<type>[RCLrcl]?)(?P<code>\d{4})$")
 _TYPE_LIB = {"R": "Resistor_SMD", "C": "Capacitor_SMD", "L": "Inductor_SMD"}
 
@@ -54,9 +63,14 @@ class Match:
 
 
 def package_token(footprint_name: str) -> str:
-    """`SOT-23-5_L3.0-W1.6-...` -> `SOT-23-5`; leaves names without dims intact."""
+    """`SOT-23-5_L3.0-W1.6-...` -> `SOT-23-5`, `CRYSTAL-SMD_4P-L3.2-...` ->
+    `CRYSTAL-SMD`. Without a dimension suffix, fall back to the first
+    `_`-segment (`USB-C-SMD_TYPE-C-16PIN-...` -> `USB-C-SMD`); names with no
+    `_` at all pass through intact."""
     m = _DIM_SUFFIX.match(footprint_name)
-    return m.group("token") if m else footprint_name
+    if m:
+        return m.group("token")
+    return footprint_name.split("_", 1)[0]
 
 
 def find_footprint_root(override: Path | None = None) -> Path | None:
@@ -73,11 +87,12 @@ def find_footprint_root(override: Path | None = None) -> Path | None:
         v = os.environ.get(var)
         if v:
             candidates.append(Path(v))
-    home = Path.home()
+    # System installs first (apt's /usr/share/kicad on Linux, the app bundle on
+    # macOS) — the package manager keeps those current; per-user copies last.
     for base in (
-        home / ".local/share/kicad",
         Path("/usr/share/kicad"),
         Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport"),
+        Path.home() / ".local/share/kicad",
     ):
         candidates.append(base / "footprints")
         if base.is_dir():
@@ -89,7 +104,7 @@ def find_footprint_root(override: Path | None = None) -> Path | None:
     return None
 
 
-def _search_tokens(token: str, comp_type: str | None) -> tuple[list[str], str | None]:
+def _search_tokens(token: str, comp_type: str | None, full_name: str = "") -> tuple[list[str], str | None]:
     """Return (name tokens to match, restrict-to-lib or None)."""
     passive = _PASSIVE_CODE.match(token)
     if passive:
@@ -98,6 +113,10 @@ def _search_tokens(token: str, comp_type: str | None) -> tuple[list[str], str | 
         lib = _TYPE_LIB.get(t)
         return [code], lib
     tokens = [token, *ALIASES.get(token, [])]
+    powerpad = _POWERPAD.match(token)
+    if powerpad and ("POWERPAD" in token.upper() or "-EP" in full_name.upper()):
+        n = powerpad.group("n")
+        tokens += [f"SOIC-{n}-1EP", f"HSOP-{n}-1EP", f"PDSO-G{n}"]
     return tokens, None
 
 
@@ -120,7 +139,7 @@ def find_candidates(
     gen = load_footprint(generated_mod)
     token = package_token(generated_mod.stem)
     pad_count = len(gen.pads)
-    tokens, restrict_lib = _search_tokens(token, comp_type)
+    tokens, restrict_lib = _search_tokens(token, comp_type, generated_mod.stem)
 
     lib_dirs = sorted(root.glob("*.pretty"))
     if restrict_lib:

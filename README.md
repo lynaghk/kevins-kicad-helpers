@@ -23,9 +23,15 @@ chooser (arrow keys flip between origin/scale-aligned previews, `space` peeks at
 the EasyEDA original, `r` rotates, `f` shows the back, `?` for help). Substituting
 writes the standard `lib:footprint` into the symbol, records any 90° orientation
 difference as an `FT Rotation Offset` field (used by the JLCPCB Fabrication
-Toolkit), and deletes the now-unused generated files. Useful flags: `--project`
-(point at / disambiguate a `.kicad_pro`), `--lib-name`, `--auto-single`,
-`--no-standard-footprints`, `--overwrite`.
+Toolkit), and deletes the now-unused generated files. It also checks KiCad's
+standard _symbol_ libraries by MPN and tells you when the part already ships
+with KiCad (e.g. `Regulator_Linear:AMS1117-3.3`) — meaning you may not have
+needed the import at all. Useful flags: `--project` (point at / disambiguate a
+`.kicad_pro`), `--lib-name`, `--auto-single`, `--non-interactive` (no TUI —
+print the candidate/symbol report and keep the generated footprints; good for
+scripted or agent-driven analysis), `--no-standard-footprints`,
+`--no-standard-symbols`, `--kicad-footprints-dir`, `--kicad-symbols-dir`,
+`--overwrite`.
 
 The code lives in `easyeda-import/` (the `bin/` entry is a symlink); its offline
 tests run with `uv run easyeda-import/test_easyeda_import.py`.

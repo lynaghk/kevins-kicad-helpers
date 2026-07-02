@@ -59,6 +59,16 @@ def parse_args() -> argparse.Namespace:
         help="Skip matching imported parts against KiCad's standard footprint libraries.",
     )
     parser.add_argument(
+        "--no-standard-symbols",
+        action="store_true",
+        help="Skip checking whether KiCad's standard symbol libraries already have the part.",
+    )
+    parser.add_argument(
+        "--kicad-symbols-dir",
+        type=Path,
+        help="Override the location of KiCad's standard symbol libraries (dir of *.kicad_sym).",
+    )
+    parser.add_argument(
         "--auto-single",
         action="store_true",
         help="When exactly one standard footprint matches, substitute it without opening the chooser.",
@@ -67,6 +77,15 @@ def parse_args() -> argparse.Namespace:
         "--kicad-footprints-dir",
         type=Path,
         help="Override the location of KiCad's standard footprint libraries (dir of *.pretty).",
+    )
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help=(
+            "Never open the footprint chooser: print the standard-footprint candidates for each "
+            "part and keep the generated footprints. Combine with --auto-single to still "
+            "substitute unambiguous matches."
+        ),
     )
     parser.add_argument(
         "--print-args",
@@ -286,6 +305,42 @@ def _set_symbol_property(symbol_lib: Path, lcsc_id: str, key: str, value: str) -
     symbol_lib.write_text(text[: m.end()] + block + text[m.end() :])
 
 
+def report_standard_symbols(project_root: Path, symbol_path: Path, parts: list[str], args) -> None:
+    """Tell the user when KiCad's standard library already has a part's symbol —
+    the import may have been unnecessary. Report-only: the imported symbol is
+    kept (deciding to use the standard one is a schematic-level choice)."""
+    try:
+        _ensure_chooser_path()
+        import symbol_matcher
+    except Exception as exc:  # pragma: no cover - optional feature
+        print(f"[symbols] checker unavailable ({exc}); skipping standard-symbol check.")
+        return
+
+    root = symbol_matcher.find_symbol_root(args.kicad_symbols_dir)
+    if not root:
+        print("[symbols] KiCad standard symbol libraries not found; skipping standard-symbol check.")
+        return
+    index = symbol_matcher.load_index(root)
+
+    for part, props in _symbols_by_lcsc(project_root / symbol_path).items():
+        if part not in parts:
+            continue
+        mpn = props.get("Value", "")
+        matches = symbol_matcher.match_mpn(mpn, index)
+        if not matches:
+            continue
+        exact = [m for m in matches if m.exact]
+        if exact:
+            refs = ", ".join(m.ref for m in exact[:3])
+            print(
+                f"[symbols] {part} ({mpn}): KiCad's standard library already has this part "
+                f"({refs}) — you likely don't need the imported symbol."
+            )
+        else:
+            refs = ", ".join(m.ref for m in matches[:3])
+            print(f"[symbols] {part} ({mpn}): close standard-library symbol(s): {refs} — worth checking.")
+
+
 def substitute_standard_footprints(
     project_root: Path,
     symbol_path: Path,
@@ -311,7 +366,7 @@ def substitute_standard_footprints(
     symbol_lib = project_root / symbol_path
     footprint_dir = project_root / footprint_path
     index = _symbols_by_lcsc(symbol_lib)
-    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    interactive = not args.non_interactive and sys.stdin.isatty() and sys.stdout.isatty()
 
     for part in parts:
         props = index.get(part)
@@ -357,11 +412,11 @@ def substitute_standard_footprints(
             chosen_ref = chosen.ref
             print(f"[footprints] {part}: substituted {fp_ref} -> {chosen_ref}{_rot_note(rotation)}")
         else:
-            names = ", ".join(m.ref for m in matches[:5])
-            print(
-                f"[footprints] {part}: {len(matches)} standard candidate(s) ({names}); "
-                f"kept {fp_ref} (run in a terminal or pass --auto-single to substitute)."
-            )
+            print(f"[footprints] {part}: {len(matches)} standard candidate(s) for {fp_ref}; kept generated.")
+            for m in matches[:5]:
+                print(f"[footprints]   {m.ref}  (pad-area mismatch {m.mismatch}, rot {m.rotation:+d}°)")
+            if len(matches) > 5:
+                print(f"[footprints]   ... and {len(matches) - 5} more")
             continue
 
         text = symbol_lib.read_text()
@@ -417,6 +472,9 @@ def main() -> None:
 
     rename_symbol_lcsc_field(project_root / symbol_path)
     ensure_project_library_tables(project_root, lib_name, symbol_path, lib_name, footprint_path)
+
+    if not args.no_standard_symbols:
+        report_standard_symbols(project_root, symbol_path, args.parts, args)
 
     if not args.no_standard_footprints:
         substitute_standard_footprints(
