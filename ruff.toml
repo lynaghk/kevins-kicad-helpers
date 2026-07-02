@@ -1,0 +1,5 @@
+# Config for scripts/format-python (and any editor ruff integration).
+# 112 is the de-facto max line length of the pre-ruff codebase — chosen so
+# adopting the formatter reformatted as little as possible.
+line-length = 112
+target-version = "py310"

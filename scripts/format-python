@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Format all Python in this repo with ruff (config: /ruff.toml). Files are
+# discovered from git — every tracked or untracked-but-not-ignored *.py — so a
+# new helper folder's Python is covered the moment the files exist; no per-tool
+# bin/format stub or other wiring needed. Extra args pass through to
+# `ruff format` (e.g. `scripts/format-python --check` for CI).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Bail if git finds no Python at all: ruff invoked with no paths would default
+# to formatting the whole tree, ignored scratch directories included.
+if [ -z "$(git ls-files -co --exclude-standard -- '*.py' | head -n 1)" ]; then
+    echo "No Python files found."
+    exit 0
+fi
+
+git ls-files -co --exclude-standard -z -- '*.py' | xargs -0 uvx ruff@0.15.20 format "$@"

@@ -64,3 +64,8 @@ whatever — they just have to be executable. A stub exiting with code 125 is
 reported as SKIP without failing the run (e.g. `analyzer/bin/test` when the
 `clojure` CLI isn't installed). To add tests or formatting to a tool, drop in a
 stub; nothing else needs wiring.
+
+Python is the exception: it is formatted repo-wide rather than per tool.
+`scripts/format-python` (also run by `bb format`) ruff-formats every tracked or
+untracked-but-not-ignored `*.py` using the config in `ruff.toml`, so a new
+helper's Python is picked up automatically — no stub needed.

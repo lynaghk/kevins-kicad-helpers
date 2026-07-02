@@ -1,5 +1,6 @@
 {:tasks
- {format {:doc "Run bin/format in every tool folder that has one."
-          :task (shell "scripts/run-all.bb format")}
+ {format {:doc "Run bin/format in every tool folder that has one, then format all Python repo-wide."
+          :task (do (shell "scripts/run-all.bb format")
+                    (shell "scripts/format-python"))}
   test {:doc "Run bin/test in every tool folder that has one."
         :task (shell "scripts/run-all.bb test")}}}
