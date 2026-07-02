@@ -61,8 +61,7 @@ class Progress:
         if self.quiet:
             return
         self._clear()
-        print(f"\n\033[1m==>\033[0m {msg}" if self.tty else f"\n==> {msg}",
-              file=sys.stderr, flush=True)
+        print(f"\n\033[1m==>\033[0m {msg}" if self.tty else f"\n==> {msg}", file=sys.stderr, flush=True)
 
     def step(self, i, total, label=""):
         if self.quiet:
@@ -76,8 +75,7 @@ class Progress:
         if self.tty:
             pad = " " * max(0, self._width - len(msg))
             self._width = len(msg)
-            print("\r" + msg + pad, file=sys.stderr,
-                  end=("\n" if last else ""), flush=True)
+            print("\r" + msg + pad, file=sys.stderr, end=("\n" if last else ""), flush=True)
         else:
             if last or total <= 20 or i % max(1, total // 20) == 0:
                 print(msg, file=sys.stderr, flush=True)
@@ -90,8 +88,7 @@ class Progress:
 
     def _clear(self):
         if self.tty and self._width:
-            print("\r" + " " * self._width + "\r", file=sys.stderr,
-                  end="", flush=True)
+            print("\r" + " " * self._width + "\r", file=sys.stderr, end="", flush=True)
             self._width = 0
 
 
@@ -99,8 +96,7 @@ class Progress:
 #  Board export via kicad-cli
 # ===========================================================================
 def export_full_step(board_path, out_path, opts, prog):
-    cmd = ["kicad-cli", "pcb", "export", "step", "--subst-models",
-           "-f", "-o", out_path]
+    cmd = ["kicad-cli", "pcb", "export", "step", "--subst-models", "-f", "-o", out_path]
     if opts.silkscreen:
         cmd.append("--include-silkscreen")
     if opts.soldermask:
@@ -154,13 +150,12 @@ class Step:
     header so we can round-trip it."""
 
     def __init__(self, text):
-        m = re.search(r"(.*?\bDATA;)(.*?)(\bENDSEC;.*?END-ISO-10303-21;)",
-                      text, re.S)
+        m = re.search(r"(.*?\bDATA;)(.*?)(\bENDSEC;.*?END-ISO-10303-21;)", text, re.S)
         if not m:
             raise SystemExit("input does not look like a STEP file")
         self.header = m.group(1)
-        self.bodies = {}     # id -> body text (everything after '#id =', no ';')
-        self.order = []      # ids in original order
+        self.bodies = {}  # id -> body text (everything after '#id =', no ';')
+        self.order = []  # ids in original order
         for raw in split_entities(m.group(2)):
             s = raw.strip()
             if not s:
@@ -215,12 +210,12 @@ def fmt(v):
 # 6 faces of a box, each as a vertex-index loop wound CCW as seen from outside
 # (verified by hand so the right-hand-rule normal points outward).
 _BOX_FACES = (
-    (0, 3, 2, 1),   # bottom (-Z)
-    (4, 5, 6, 7),   # top    (+Z)
-    (0, 1, 5, 4),   # front  (-Y)
-    (3, 7, 6, 2),   # back   (+Y)
-    (0, 4, 7, 3),   # left   (-X)
-    (1, 2, 6, 5),   # right  (+X)
+    (0, 3, 2, 1),  # bottom (-Z)
+    (4, 5, 6, 7),  # top    (+Z)
+    (0, 1, 5, 4),  # front  (-Y)
+    (3, 7, 6, 2),  # back   (+Y)
+    (0, 4, 7, 3),  # left   (-X)
+    (1, 2, 6, 5),  # right  (+X)
 )
 
 
@@ -228,8 +223,16 @@ def emit_box_brep(step, lo, hi):
     """Append a MANIFOLD_SOLID_BREP box spanning lo..hi; return its id."""
     x0, y0, z0 = lo
     x1, y1, z1 = hi
-    V = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
-         (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
+    V = [
+        (x0, y0, z0),
+        (x1, y0, z0),
+        (x1, y1, z0),
+        (x0, y1, z0),
+        (x0, y0, z1),
+        (x1, y0, z1),
+        (x1, y1, z1),
+        (x0, y1, z1),
+    ]
 
     vpoint = []
     for v in V:
@@ -262,27 +265,23 @@ def emit_box_brep(step, lo, hi):
             ec, ea, eb = get_edge(a, b)
             sense = ".T." if (ea, eb) == (a, b) else ".F."
             oriented.append(step.add(f"ORIENTED_EDGE('',*,*,#{ec},{sense})"))
-        loop_id = step.add("EDGE_LOOP('',(" +
-                           ",".join(f"#{o}" for o in oriented) + "))")
+        loop_id = step.add("EDGE_LOOP('',(" + ",".join(f"#{o}" for o in oriented) + "))")
         bound = step.add(f"FACE_OUTER_BOUND('',#{loop_id},.T.)")
         # outward normal from the loop
         a, b, c = V[loop[0]], V[loop[1]], V[loop[2]]
         u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
         w = (c[0] - b[0], c[1] - b[1], c[2] - b[2])
-        nx, ny, nz = (u[1] * w[2] - u[2] * w[1],
-                      u[2] * w[0] - u[0] * w[2],
-                      u[0] * w[1] - u[1] * w[0])
+        nx, ny, nz = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
         nl = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
         ul = math.sqrt(u[0] ** 2 + u[1] ** 2 + u[2] ** 2) or 1.0
-        axn = step.add(f"DIRECTION('',({fmt(nx/nl)},{fmt(ny/nl)},{fmt(nz/nl)}))")
-        axr = step.add(f"DIRECTION('',({fmt(u[0]/ul)},{fmt(u[1]/ul)},{fmt(u[2]/ul)}))")
+        axn = step.add(f"DIRECTION('',({fmt(nx / nl)},{fmt(ny / nl)},{fmt(nz / nl)}))")
+        axr = step.add(f"DIRECTION('',({fmt(u[0] / ul)},{fmt(u[1] / ul)},{fmt(u[2] / ul)}))")
         loc = step.add(f"CARTESIAN_POINT('',({fmt(a[0])},{fmt(a[1])},{fmt(a[2])}))")
         plane_axis = step.add(f"AXIS2_PLACEMENT_3D('',#{loc},#{axn},#{axr})")
         plane = step.add(f"PLANE('',#{plane_axis})")
         face_ids.append(step.add(f"ADVANCED_FACE('',(#{bound}),#{plane},.T.)"))
 
-    shell = step.add("CLOSED_SHELL('',(" +
-                     ",".join(f"#{f}" for f in face_ids) + "))")
+    shell = step.add("CLOSED_SHELL('',(" + ",".join(f"#{f}" for f in face_ids) + "))")
     return step.add(f"MANIFOLD_SOLID_BREP('',#{shell})")
 
 
@@ -290,8 +289,11 @@ def emit_box_brep(step, lo, hi):
 #  Assembly analysis
 # ===========================================================================
 GEOM_LEAF_TYPES = (
-    "MANIFOLD_SOLID_BREP", "BREP_WITH_VOIDS", "FACETED_BREP",
-    "SHELL_BASED_SURFACE_MODEL", "GEOMETRIC_SET",
+    "MANIFOLD_SOLID_BREP",
+    "BREP_WITH_VOIDS",
+    "FACETED_BREP",
+    "SHELL_BASED_SURFACE_MODEL",
+    "GEOMETRIC_SET",
 )
 
 
@@ -326,8 +328,7 @@ def collect_points(step, start):
             continue
         seen.add(i)
         if step.etype(i) == "CARTESIAN_POINT":
-            nums = re.findall(r"-?[0-9.]+(?:[eE][-+]?[0-9]+)?",
-                              step.bodies[i].split("(", 1)[1])
+            nums = re.findall(r"-?[0-9.]+(?:[eE][-+]?[0-9]+)?", step.bodies[i].split("(", 1)[1])
             if len(nums) >= 3:
                 x, y, z = float(nums[0]), float(nums[1]), float(nums[2])
                 lo[0], lo[1], lo[2] = min(lo[0], x), min(lo[1], y), min(lo[2], z)
@@ -346,11 +347,11 @@ def map_products(step):
     product_name:    product id -> name string
     nauo_children:   set of product ids that appear as a NAUO child
     """
-    pds_to_pd = {}      # product_definition_shape -> product_definition
+    pds_to_pd = {}  # product_definition_shape -> product_definition
     pd_to_pdf = {}
     pdf_to_prod = {}
     prod_name = {}
-    sdr = []            # (pds, rep)
+    sdr = []  # (pds, rep)
     nauo_children = set()
     nauo_parent_of = {}  # child_prod -> parent_prod
     pd_to_prod = {}
@@ -377,7 +378,7 @@ def map_products(step):
                 sdr.append((r[0], r[1]))
         elif t == "NEXT_ASSEMBLY_USAGE_OCCURRENCE":
             if len(r) >= 2:
-                nauo_children.add(r[-1])      # child product_definition
+                nauo_children.add(r[-1])  # child product_definition
                 nauo_parent_of[r[-1]] = r[-2]
 
     def pd_product(pd):
@@ -412,8 +413,7 @@ ROOT_TYPES = {
 
 
 def garbage_collect(step, prog):
-    seeds = [i for i in step.order
-             if i in step.bodies and step.etype(i) in ROOT_TYPES]
+    seeds = [i for i in step.order if i in step.bodies and step.etype(i) in ROOT_TYPES]
     seen = set()
     stack = list(seeds)
     while stack:
@@ -425,8 +425,7 @@ def garbage_collect(step, prog):
     before = len(step.bodies)
     step.order = [i for i in step.order if i in seen]
     step.bodies = {i: step.bodies[i] for i in seen}
-    prog.info(f"garbage collected {before - len(step.bodies)} entities "
-              f"({len(step.bodies)} kept)")
+    prog.info(f"garbage collected {before - len(step.bodies)} entities ({len(step.bodies)} kept)")
 
 
 # ===========================================================================
@@ -452,8 +451,8 @@ def rewrite_rep_items(step, rep_id, drop_ids, new_brep_id):
 # step_pcb_model.cpp pushToAssembly(... "PCB"/"copper"/"pad"/"via"/
 # "silkscreen"/"soldermask" ...).
 BOARD_SUFFIX_RE = re.compile(
-    r"_(PCB|copper|pad|pads|via|vias|silkscreen|soldermask|paste|courtyard)$",
-    re.IGNORECASE)
+    r"_(PCB|copper|pad|pads|via|vias|silkscreen|soldermask|paste|courtyard)$", re.IGNORECASE
+)
 
 
 def simplify(step, board_prefix, root_name, prog):
@@ -466,7 +465,7 @@ def simplify(step, board_prefix, root_name, prog):
         return bool(board_prefix) and name.startswith(board_prefix + "_")
 
     # component reps that directly contain solid geometry
-    targets = []   # (rep_id, product, brep_ids)
+    targets = []  # (rep_id, product, brep_ids)
     for rep, prod in rep_to_product.items():
         if is_board(prod):
             continue
@@ -496,9 +495,12 @@ def simplify(step, board_prefix, root_name, prog):
         if not drop or math.isinf(lo[0]):
             continue
         # remember this rep's presentation context so we can drop its styles
-        ctx_ids = [r for r in step.refs(rep)
-                   if step.etype(r).startswith("GEOMETRIC_REPRESENTATION_CONTEXT")
-                   or "REPRESENTATION_CONTEXT" in step.bodies.get(r, "")]
+        ctx_ids = [
+            r
+            for r in step.refs(rep)
+            if step.etype(r).startswith("GEOMETRIC_REPRESENTATION_CONTEXT")
+            or "REPRESENTATION_CONTEXT" in step.bodies.get(r, "")
+        ]
         comp_contexts.update(ctx_ids)
         box = emit_box_brep(step, tuple(lo), tuple(hi))
         rewrite_rep_items(step, rep, drop, box)
@@ -508,14 +510,14 @@ def simplify(step, board_prefix, root_name, prog):
     dropped_mdgpr = 0
     if comp_contexts:
         for i in list(step.order):
-            if (i in step.bodies and
-                    step.etype(i) == "MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"):
+            if i in step.bodies and step.etype(i) == "MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION":
                 ctx = step.refs(i)[-1] if step.refs(i) else None
                 if ctx in comp_contexts:
                     del step.bodies[i]
                     dropped_mdgpr += 1
-    prog.info(f"replaced {n_solids} solids with {len(targets)} boxes; "
-              f"dropped {dropped_mdgpr} component style sets")
+    prog.info(
+        f"replaced {n_solids} solids with {len(targets)} boxes; dropped {dropped_mdgpr} component style sets"
+    )
     return len(targets), n_solids
 
 
@@ -534,24 +536,21 @@ def find_root_name(step):
 #  Driver
 # ===========================================================================
 def main():
-    ap = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("input", help="input .kicad_pcb (exported via kicad-cli) "
-                    "or an already-exported .step file")
-    ap.add_argument("-o", "--output",
-                    help="output .step (default: <input>.simplified.step)")
-    ap.add_argument("--copper", dest="copper", action="store_true",
-                    help="include copper (tracks/pads/zones) from the board")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("input", help="input .kicad_pcb (exported via kicad-cli) or an already-exported .step file")
+    ap.add_argument("-o", "--output", help="output .step (default: <input>.simplified.step)")
+    ap.add_argument(
+        "--copper", dest="copper", action="store_true", help="include copper (tracks/pads/zones) from the board"
+    )
     ap.add_argument("--no-soldermask", dest="soldermask", action="store_false")
     ap.add_argument("--no-silkscreen", dest="silkscreen", action="store_false")
-    ap.add_argument("--include-dnp", action="store_true",
-                    help="also include Do-Not-Populate components")
-    ap.add_argument("--board-name",
-                    help="override the board product-name prefix used to tell "
-                    "board geometry from components (default: auto-detected)")
-    ap.add_argument("--keep-full", action="store_true",
-                    help="keep the intermediate full STEP export")
+    ap.add_argument("--include-dnp", action="store_true", help="also include Do-Not-Populate components")
+    ap.add_argument(
+        "--board-name",
+        help="override the board product-name prefix used to tell "
+        "board geometry from components (default: auto-detected)",
+    )
+    ap.add_argument("--keep-full", action="store_true", help="keep the intermediate full STEP export")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
@@ -562,8 +561,7 @@ def main():
     if not os.path.isfile(inp):
         raise SystemExit(f"no such file: {inp}")
     stem = re.sub(r"\.(kicad_pcb|step|stp)$", "", os.path.basename(inp))
-    out_path = args.output or os.path.join(os.path.dirname(inp),
-                                           stem + ".simplified.step")
+    out_path = args.output or os.path.join(os.path.dirname(inp), stem + ".simplified.step")
 
     is_step = inp.lower().endswith((".step", ".stp"))
     full_step = inp
@@ -585,8 +583,7 @@ def main():
     prog.info(f"{len(step.bodies)} entities")
 
     root_name = args.board_name + " 1" if args.board_name else find_root_name(step)
-    board_prefix = (args.board_name if args.board_name
-                    else re.sub(r"\s+\d+$", "", root_name))
+    board_prefix = args.board_name if args.board_name else re.sub(r"\s+\d+$", "", root_name)
     prog.info(f"root product: '{root_name}'  -> board prefix: '{board_prefix}'")
 
     n_defs, n_solids = simplify(step, board_prefix, root_name, prog)
@@ -609,13 +606,16 @@ def main():
         shutil.rmtree(tmp_dir, ignore_errors=True)
     prog.phase("Done")
     if not args.quiet:
-        print(f"""
-  output:              {out_path}  ({size/1e6:.1f} MB)
+        print(
+            f"""
+  output:              {out_path}  ({size / 1e6:.1f} MB)
   unique components:   {n_defs}   (boxes emitted)
   solids replaced:     {n_solids}
-  {"full export size:    %.1f MB" % (in_size/1e6) if in_size else ""}
-  elapsed:             {time.time()-t0:.1f}s
-""", file=sys.stderr)
+  {"full export size:    %.1f MB" % (in_size / 1e6) if in_size else ""}
+  elapsed:             {time.time() - t0:.1f}s
+""",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

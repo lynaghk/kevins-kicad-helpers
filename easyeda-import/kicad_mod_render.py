@@ -249,8 +249,10 @@ def _arc_points(node: list, segments: int = 24) -> list[tuple[float, float]]:
         a3 = math.atan2(p3[1] - cy, p3[0] - cx)
         ccw = (a3 - a1) % (2 * math.pi)
         sweep = ccw if (am - a1) % (2 * math.pi) <= ccw else ccw - 2 * math.pi
-        return [(cx + r * math.cos(a1 + sweep * i / segments),
-                 cy + r * math.sin(a1 + sweep * i / segments)) for i in range(segments + 1)]
+        return [
+            (cx + r * math.cos(a1 + sweep * i / segments), cy + r * math.sin(a1 + sweep * i / segments))
+            for i in range(segments + 1)
+        ]
 
     if start and end and angle:  # old: centre + start point + swept angle
         cx, cy = _num(start[1]), _num(start[2])
@@ -258,8 +260,10 @@ def _arc_points(node: list, segments: int = 24) -> list[tuple[float, float]]:
         r = math.hypot(ex - cx, ey - cy)
         a0 = math.atan2(ey - cy, ex - cx)
         sweep = math.radians(_num(angle[1]))
-        return [(cx + r * math.cos(a0 + sweep * i / segments),
-                 cy + r * math.sin(a0 + sweep * i / segments)) for i in range(segments + 1)]
+        return [
+            (cx + r * math.cos(a0 + sweep * i / segments), cy + r * math.sin(a0 + sweep * i / segments))
+            for i in range(segments + 1)
+        ]
 
     if start and end:  # degenerate: chord
         return [(_num(start[1]), _num(start[2])), (_num(end[1]), _num(end[2]))]

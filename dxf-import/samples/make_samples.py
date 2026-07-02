@@ -13,6 +13,7 @@ filename convention. Run with::
 The expected primitive counts are documented next to each builder and asserted
 by the offline tests in ../test_kicad_dxf_import.py.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -43,8 +44,7 @@ def board_edge_cuts() -> "ezdxf.document.Drawing":
 def holes_user1() -> "ezdxf.document.Drawing":
     """holes_User.1.dxf -> 5 CIRCLEs."""
     doc, msp = _new()
-    for (cx, cy, r) in [(10, 10, 1.5), (25, 10, 2.0), (40, 10, 2.5),
-                        (17, 25, 3.0), (33, 25, 1.0)]:
+    for cx, cy, r in [(10, 10, 1.5), (25, 10, 2.0), (40, 10, 2.5), (17, 25, 3.0), (33, 25, 1.0)]:
         msp.add_circle(center=(cx, cy), radius=r)
     return doc
 
@@ -69,7 +69,7 @@ def mixed_dwgs() -> "ezdxf.document.Drawing":
     Coordinates are kept simple so the offset/scale transform is easy to assert.
     """
     doc, msp = _new()
-    msp.add_line((0, 0), (10, 0))                                  # segment
+    msp.add_line((0, 0), (10, 0))  # segment
     msp.add_arc(center=(20, 0), radius=5, start_angle=0, end_angle=90)
     msp.add_circle(center=(0, 20), radius=4)
     msp.add_lwpolyline([(0, 0), (5, 5), (10, 0)], format="xy", close=False)  # 2 segments

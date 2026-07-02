@@ -310,9 +310,7 @@ def choose(
     selected = max(0, min(preselect, len(candidates) - 1))
     side = "front"
     ref = fps[reference_index]
-    rotations = [
-        0 if i == reference_index else suggest_rotation(ref, fp) for i, fp in enumerate(fps)
-    ]
+    rotations = [0 if i == reference_index else suggest_rotation(ref, fp) for i, fp in enumerate(fps)]
     proto = terminal_image.protocol()
     kbd = proto == "kitty"  # kitty keyboard protocol gives key-release events
     peek = False  # while true, show the EasyEDA reference instead of the selection

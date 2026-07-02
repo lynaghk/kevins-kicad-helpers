@@ -20,6 +20,7 @@ The split is on the *last* underscore, so the id may contain underscores
 Requires a running KiCad 10 with the IPC API server enabled
 (Preferences -> Plugins -> Enable IPC API) and the target board open.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,6 +40,7 @@ Point = Tuple[float, float]
 # Pure helpers (no KiCad / kipy dependency -- unit-testable offline)
 # --------------------------------------------------------------------------- #
 
+
 def parse_filename(path: Path) -> Tuple[str, str]:
     """Return (id, layer_name) parsed from ``<id>_<Layer>.dxf``.
 
@@ -48,14 +50,11 @@ def parse_filename(path: Path) -> Tuple[str, str]:
     stem = path.stem  # strips the final ".dxf"
     if "_" not in stem:
         raise ValueError(
-            f"Filename {path.name!r} does not match '<id>_<Layer>.dxf' "
-            f"(no underscore separating id and layer)."
+            f"Filename {path.name!r} does not match '<id>_<Layer>.dxf' (no underscore separating id and layer)."
         )
     id_, layer_name = stem.rsplit("_", 1)
     if not id_ or not layer_name:
-        raise ValueError(
-            f"Filename {path.name!r} does not match '<id>_<Layer>.dxf'."
-        )
+        raise ValueError(f"Filename {path.name!r} does not match '<id>_<Layer>.dxf'.")
     return id_, layer_name
 
 
@@ -132,10 +131,7 @@ def _arc_three_points(
     if sweep == 0.0:
         sweep = 360.0
     angles = (start_deg, start_deg + sweep / 2.0, end_deg)
-    pts = [
-        (cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a)))
-        for a in angles
-    ]
+    pts = [(cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a))) for a in angles]
     return pts[0], pts[1], pts[2]
 
 
@@ -245,9 +241,7 @@ def iter_primitives(
 
         elif dxftype == "ARC":
             c = e.dxf.center
-            p1, pm, p2 = _arc_three_points(
-                c[0], c[1], e.dxf.radius, e.dxf.start_angle, e.dxf.end_angle
-            )
+            p1, pm, p2 = _arc_three_points(c[0], c[1], e.dxf.radius, e.dxf.start_angle, e.dxf.end_angle)
             yield Arc(tf.pt(*p1), tf.pt(*pm), tf.pt(*p2))
 
         elif dxftype == "LWPOLYLINE":
@@ -259,8 +253,7 @@ def iter_primitives(
             "AcDb3dPolyline",
         ):
             pts = [
-                (v.dxf.location[0], v.dxf.location[1], float(getattr(v.dxf, "bulge", 0.0)))
-                for v in e.vertices
+                (v.dxf.location[0], v.dxf.location[1], float(getattr(v.dxf, "bulge", 0.0))) for v in e.vertices
             ]
             yield from _spans_to_primitives(_polyline_spans(pts, e.is_closed), tf)
 
@@ -275,9 +268,7 @@ def iter_primitives(
             skipped[dxftype] += 1
 
 
-def _spans_to_primitives(
-    spans: Iterable[Tuple[Point, Point, float]], tf: Transform
-) -> Iterator[Primitive]:
+def _spans_to_primitives(spans: Iterable[Tuple[Point, Point, float]], tf: Transform) -> Iterator[Primitive]:
     for p1, p2, bulge in spans:
         if abs(bulge) < 1e-12 or math.hypot(p2[0] - p1[0], p2[1] - p1[1]) == 0.0:
             yield Segment(tf.pt(*p1), tf.pt(*p2))
@@ -289,6 +280,7 @@ def _spans_to_primitives(
 # --------------------------------------------------------------------------- #
 # kipy conversion (needs kicad-python, but not a running KiCad to construct)
 # --------------------------------------------------------------------------- #
+
 
 def primitives_to_shapes(primitives: Iterable[Primitive], layer, width_nm: int):
     """Convert primitives into kipy board shapes on ``layer`` with stroke width."""
@@ -333,9 +325,7 @@ def build_shapes(
 
     doc = ezdxf.readfile(str(dxf_path))
     skipped: Counter = Counter()
-    primitives = list(
-        iter_primitives(doc.modelspace(), tf, flatten_mm, skipped, include_construction)
-    )
+    primitives = list(iter_primitives(doc.modelspace(), tf, flatten_mm, skipped, include_construction))
     duplicates = 0
     if dedupe:
         deduped = dedupe_primitives(primitives)
@@ -348,6 +338,7 @@ def build_shapes(
 # --------------------------------------------------------------------------- #
 # KiCad IPC import
 # --------------------------------------------------------------------------- #
+
 
 def resolve_layer(board, name: str):
     """Resolve a layer name to a BoardLayer enum against the board's real layers.
@@ -379,8 +370,7 @@ def resolve_layer(board, name: str):
             return lyr
 
     raise ValueError(
-        f"unknown layer {name!r}; enable it on the board or use one of: "
-        + ", ".join(sorted(available))
+        f"unknown layer {name!r}; enable it on the board or use one of: " + ", ".join(sorted(available))
     )
 
 
@@ -448,6 +438,7 @@ def import_dxf(board, group_id: str, shapes, replace: bool):
 # CLI
 # --------------------------------------------------------------------------- #
 
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="kicad_dxf_import.py",
@@ -479,41 +470,68 @@ def build_parser() -> argparse.ArgumentParser:
             """
         ),
     )
-    p.add_argument("path", type=Path, nargs="?", default=None,
-                   help="DXF file named <id>_<Layer>.dxf (one-shot), or a "
-                        "directory to watch (with --watch; defaults to '.')")
-    p.add_argument("--watch", action="store_true",
-                   help="Watch a directory and re-sync every <id>_<Layer>.dxf "
-                        "file whenever it changes or a new one appears")
-    p.add_argument("--interval", type=float, default=1.0,
-                   help="Polling interval in seconds for --watch (default 1.0)")
-    p.add_argument("--offset-x", type=float, default=0.0,
-                   help="X offset in mm added in KiCad space (default 0)")
-    p.add_argument("--offset-y", type=float, default=0.0,
-                   help="Y offset in mm added in KiCad space (default 0)")
-    p.add_argument("--scale", type=float, default=1.0,
-                   help="Scale factor for DXF coords; use 25.4 for an inch DXF "
-                        "(default 1.0 = DXF units treated as mm)")
-    p.add_argument("--line-width", type=float, default=0.1,
-                   help="Stroke width in mm for imported graphics (default 0.1)")
-    p.add_argument("--flatten", type=float, default=0.02,
-                   help="Max deviation in mm when flattening splines/ellipses "
-                        "(default 0.02)")
-    p.add_argument("--include-construction", action="store_true",
-                   help="Import construction geometry too (Defpoints layer, "
-                        "off/frozen layers, dashed/center/hidden linetypes). "
-                        "By default these are excluded.")
-    p.add_argument("--dedupe", action=argparse.BooleanOptionalAction, default=True,
-                   help="Drop geometrically coincident duplicate shapes "
-                        "(default: on)")
-    p.add_argument("--id", dest="id_override", default=None,
-                   help="Override the ID parsed from the filename")
-    p.add_argument("--layer", dest="layer_override", default=None,
-                   help="Override the layer parsed from the filename")
-    p.add_argument("--replace", action=argparse.BooleanOptionalAction, default=True,
-                   help="Replace an existing group with the same ID (default: on)")
-    p.add_argument("--save", action="store_true",
-                   help="Save the board after importing")
+    p.add_argument(
+        "path",
+        type=Path,
+        nargs="?",
+        default=None,
+        help="DXF file named <id>_<Layer>.dxf (one-shot), or a "
+        "directory to watch (with --watch; defaults to '.')",
+    )
+    p.add_argument(
+        "--watch",
+        action="store_true",
+        help="Watch a directory and re-sync every <id>_<Layer>.dxf "
+        "file whenever it changes or a new one appears",
+    )
+    p.add_argument(
+        "--interval", type=float, default=1.0, help="Polling interval in seconds for --watch (default 1.0)"
+    )
+    p.add_argument(
+        "--offset-x", type=float, default=0.0, help="X offset in mm added in KiCad space (default 0)"
+    )
+    p.add_argument(
+        "--offset-y", type=float, default=0.0, help="Y offset in mm added in KiCad space (default 0)"
+    )
+    p.add_argument(
+        "--scale",
+        type=float,
+        default=1.0,
+        help="Scale factor for DXF coords; use 25.4 for an inch DXF (default 1.0 = DXF units treated as mm)",
+    )
+    p.add_argument(
+        "--line-width", type=float, default=0.1, help="Stroke width in mm for imported graphics (default 0.1)"
+    )
+    p.add_argument(
+        "--flatten",
+        type=float,
+        default=0.02,
+        help="Max deviation in mm when flattening splines/ellipses (default 0.02)",
+    )
+    p.add_argument(
+        "--include-construction",
+        action="store_true",
+        help="Import construction geometry too (Defpoints layer, "
+        "off/frozen layers, dashed/center/hidden linetypes). "
+        "By default these are excluded.",
+    )
+    p.add_argument(
+        "--dedupe",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Drop geometrically coincident duplicate shapes (default: on)",
+    )
+    p.add_argument("--id", dest="id_override", default=None, help="Override the ID parsed from the filename")
+    p.add_argument(
+        "--layer", dest="layer_override", default=None, help="Override the layer parsed from the filename"
+    )
+    p.add_argument(
+        "--replace",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Replace an existing group with the same ID (default: on)",
+    )
+    p.add_argument("--save", action="store_true", help="Save the board after importing")
     return p
 
 
@@ -545,8 +563,13 @@ def sync_one(dxf_path: Path, board, args, id_override=None, layer_override=None)
 
     tf = Transform(scale=args.scale, offset_x=args.offset_x, offset_y=args.offset_y)
     shapes, skipped, duplicates = build_shapes(
-        dxf_path, layer, tf, args.line_width, args.flatten,
-        include_construction=args.include_construction, dedupe=args.dedupe,
+        dxf_path,
+        layer,
+        tf,
+        args.line_width,
+        args.flatten,
+        include_construction=args.include_construction,
+        dedupe=args.dedupe,
     )
     if not shapes:
         raise ValueError("no importable geometry found")
@@ -561,15 +584,18 @@ def sync_one(dxf_path: Path, board, args, id_override=None, layer_override=None)
         board.save()
 
     return {
-        "group_id": group_id, "layer_name": layer_name,
-        "shapes": created, "requested": len(shapes),
-        "removed": removed, "skipped": skipped, "duplicates": duplicates,
+        "group_id": group_id,
+        "layer_name": layer_name,
+        "shapes": created,
+        "requested": len(shapes),
+        "removed": removed,
+        "skipped": skipped,
+        "duplicates": duplicates,
     }
 
 
 _CONNECT_HELP = (
-    "Is KiCad 10 running with the IPC API enabled "
-    "(Preferences -> Plugins -> Enable IPC API) and a board open?"
+    "Is KiCad 10 running with the IPC API enabled (Preferences -> Plugins -> Enable IPC API) and a board open?"
 )
 
 
@@ -591,8 +617,9 @@ def run_once(args) -> int:
         return 3
 
     try:
-        r = sync_one(args.path, args=args, board=board,
-                     id_override=args.id_override, layer_override=args.layer_override)
+        r = sync_one(
+            args.path, args=args, board=board, id_override=args.id_override, layer_override=args.layer_override
+        )
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -631,8 +658,7 @@ def _sync_summary(name: str, r: dict) -> str:
     if skipped:
         extra.append(f"{skipped} skipped")
     suffix = f" ({', '.join(extra)})" if extra else ""
-    return (f"synced {name} -> '{r['group_id']}' on {r['layer_name']}: "
-            f"{r['shapes']} shape(s){suffix}")
+    return f"synced {name} -> '{r['group_id']}' on {r['layer_name']}: {r['shapes']} shape(s){suffix}"
 
 
 def run_watch(args) -> int:
@@ -645,8 +671,8 @@ def run_watch(args) -> int:
         return 2
 
     print(f"Watching {watch_dir}/ for DXF changes — Ctrl-C to stop.")
-    state: dict = {}        # Path -> (mtime_ns, size) of what we last imported
-    waiting = False         # whether we've already printed "waiting for KiCad"
+    state: dict = {}  # Path -> (mtime_ns, size) of what we last imported
+    waiting = False  # whether we've already printed "waiting for KiCad"
 
     try:
         while True:

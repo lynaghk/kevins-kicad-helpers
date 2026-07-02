@@ -168,8 +168,7 @@ def ensure_project_library_entry(table: Path, table_name: str, name: str, uri: s
         existing_uri = match.group("uri")
         if existing_uri != uri:
             raise SystemExit(
-                f'{table.name} already has library "{name}" pointing to {existing_uri}, '
-                f"not {uri}."
+                f'{table.name} already has library "{name}" pointing to {existing_uri}, not {uri}.'
             )
         return
 
@@ -477,9 +476,7 @@ def main() -> None:
         report_standard_symbols(project_root, symbol_path, args.parts, args)
 
     if not args.no_standard_footprints:
-        substitute_standard_footprints(
-            project_root, symbol_path, footprint_path, lib_name, args.parts, args
-        )
+        substitute_standard_footprints(project_root, symbol_path, footprint_path, lib_name, args.parts, args)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@
 
 Run with::  uv run test_kicad_dxf_import.py
 """
+
 from __future__ import annotations
 
 import math
@@ -119,26 +120,25 @@ def test_construction_excluded():
     if "Defpoints" not in doc.layers:
         doc.layers.add("Defpoints")
     msp = doc.modelspace()
-    msp.add_line((0, 0), (10, 0))                                      # real
+    msp.add_line((0, 0), (10, 0))  # real
     msp.add_line((0, 0), (10, 10), dxfattribs={"linetype": "DASHED"})  # construction
-    msp.add_line((1, 1), (2, 2), dxfattribs={"layer": "Defpoints"})    # construction
+    msp.add_line((1, 1), (2, 2), dxfattribs={"layer": "Defpoints"})  # construction
     skipped = Counter()
     prims = list(kdi.iter_primitives(msp, kdi.Transform(), 0.02, skipped))
     assert [p.kind for p in prims] == ["segment"]
     assert sum(skipped.values()) == 2
     # opt-in keeps everything
-    prims_all = list(kdi.iter_primitives(msp, kdi.Transform(), 0.02, Counter(),
-                                         include_construction=True))
+    prims_all = list(kdi.iter_primitives(msp, kdi.Transform(), 0.02, Counter(), include_construction=True))
     assert len(prims_all) == 3
 
 
 def test_dedupe_primitives():
     prims = [
         kdi.Segment((0, 0), (10, 0)),
-        kdi.Segment((10, 0), (0, 0)),          # reversed duplicate
+        kdi.Segment((10, 0), (0, 0)),  # reversed duplicate
         kdi.Circle((1, 1), 2.0),
         kdi.Arc((0, 0), (1, 1), (2, 0)),
-        kdi.Arc((2, 0), (1, 1), (0, 0)),       # reversed duplicate
+        kdi.Arc((2, 0), (1, 1), (0, 0)),  # reversed duplicate
     ]
     out = kdi.dedupe_primitives(prims)
     assert [p.kind for p in out] == ["segment", "circle", "arc"]
@@ -153,9 +153,7 @@ def test_real_plate_reader_dxf():
         return
     doc = ezdxf.readfile(str(f))
     skipped = Counter()
-    prims = kdi.dedupe_primitives(
-        list(kdi.iter_primitives(doc.modelspace(), kdi.Transform(), 0.02, skipped))
-    )
+    prims = kdi.dedupe_primitives(list(kdi.iter_primitives(doc.modelspace(), kdi.Transform(), 0.02, skipped)))
     kinds = Counter(p.kind for p in prims)
     assert kinds == Counter({"segment": 4, "arc": 1, "circle": 1}), kinds
     assert sum(skipped.values()) == 2, skipped  # two dashed construction lines
@@ -165,6 +163,7 @@ def test_sync_one_rejects_bad_filename():
     # sync_one validates the filename before touching the board, so watch mode can
     # skip non-conforming files without a connection.
     import argparse
+
     try:
         kdi.sync_one(Path("badname.dxf"), board=None, args=argparse.Namespace())
     except ValueError:
