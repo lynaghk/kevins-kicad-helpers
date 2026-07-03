@@ -628,6 +628,33 @@ def test_commit_part_overwrite_replaces_symbol_and_removes_old_footprint():
     assert not (project / "0_test.3dshapes/OLDFP.wrl").exists()
 
 
+def test_strip_3d_model_refs_removes_model_blocks():
+    mod = (
+        "(footprint x (layer F.Cu)\n"
+        "  (pad 1 smd rect (at 0 0))\n"
+        '\t(model "${KIPRJMOD}/0_test.3dshapes/FOO.wrl"\n'
+        "\t\t(offset (xyz 0 0 0))\n"
+        "\t\t(scale (xyz 1 1 1))\n"
+        "\t\t(rotate (xyz 0 0 90))\n"
+        "\t)\n"
+        ")\n"
+    )
+    out = imp._strip_3d_model_refs(mod)
+    assert "model" not in out and "FOO.wrl" not in out
+    assert "(pad 1 smd rect (at 0 0))" in out  # geometry untouched
+    assert out.count("(") == out.count(")")  # still balanced
+    # a footprint with no model block is returned unchanged
+    plain = "(footprint y (layer F.Cu)\n  (pad 1 smd rect (at 0 0))\n)\n"
+    assert imp._strip_3d_model_refs(plain) == plain
+
+
+def test_stage_args_excludes_3d_by_default():
+    base = Path("/tmp/out/0_test")
+    default = imp.stage_args(base, ["C1"])
+    assert "--full" not in default and "--symbol" in default and "--footprint" in default
+    assert imp.stage_args(base, ["C1"], include_3d=True).count("--full") == 1
+
+
 def test_commit_part_shared_footprint_second_part_reuses_first():
     # Two parts from the same family export the SAME generated footprint file.
     # The first commit moves it into the project; the second must not crash when

@@ -57,6 +57,15 @@ def parse_args() -> argparse.Namespace:
         help="Reimport parts the project library already has, replacing their symbol/footprint/3D model.",
     )
     parser.add_argument(
+        "--include-3d-models",
+        action="store_true",
+        help=(
+            "Download the EasyEDA 3D models and keep their footprint references. "
+            "By default they are skipped (KiCad has its own 3D libraries) and the "
+            "footprint's (model ..) reference is stripped so nothing dangles."
+        ),
+    )
+    parser.add_argument(
         "--import-duplicates",
         action="store_true",
         help=(
@@ -280,6 +289,45 @@ def _remove_generated_footprint(gen_mod: Path, project_root: Path) -> list[Path]
         gen_mod.unlink()
         removed.append(gen_mod)
     return removed
+
+
+def _strip_3d_model_refs(text: str) -> str:
+    """Remove every `(model ..)` block from a .kicad_mod, including its leading
+    indentation and trailing newline. easyeda2kicad writes the reference even
+    when the 3D file itself is not downloaded, so a footprint imported without
+    models would otherwise carry a dangling ${KIPRJMOD} path KiCad warns about.
+    The scan is quote-aware so parens inside strings don't unbalance it."""
+    while True:
+        m = re.search(r"[ \t]*\(model\b", text)
+        if not m:
+            return text
+        open_paren = text.index("(", m.start())
+        depth = 0
+        in_string = escaped = False
+        end = None
+        for i in range(open_paren, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+            elif ch == '"':
+                in_string = True
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end is None:
+            return text  # malformed; leave it rather than corrupt the file
+        if end < len(text) and text[end] == "\n":
+            end += 1
+        text = text[: m.start()] + text[end:]
 
 
 def extract_symbol_block(lib_text: str, symbol_name: str) -> str | None:
@@ -558,12 +606,14 @@ def _staging_root() -> Path:
     return Path(tempfile.mkdtemp(prefix="kkh-easyeda-")).resolve()
 
 
-def stage_args(output_base: Path, parts: list[str]) -> list[str]:
+def stage_args(output_base: Path, parts: list[str], *, include_3d: bool = False) -> list[str]:
     # IDs last: easyeda2kicad has no positional for part numbers, so they must be
     # passed via --lcsc_id. Keeping the nargs="+" list at the end matches the
     # upstream README and avoids it swallowing a following flag. --overwrite is
-    # always safe here: the output is a fresh staging tree.
-    return ["--full", "--output", str(output_base), "--project-relative", "--overwrite", "--lcsc_id", *parts]
+    # always safe here: the output is a fresh staging tree. --full pulls the 3D
+    # model too; without it we ask only for symbol + footprint.
+    mode = ["--full"] if include_3d else ["--symbol", "--footprint"]
+    return [*mode, "--output", str(output_base), "--project-relative", "--overwrite", "--lcsc_id", *parts]
 
 
 def stage_parts(
@@ -572,11 +622,15 @@ def stage_parts(
     relative_lib_dir: Path,
     lib_name: str,
     project_symbol_lib: Path,
+    *,
+    include_3d: bool = False,
 ) -> None:
     """Download and convert into a temp tree that mirrors the project layout.
     easyeda2kicad writes its ${KIPRJMOD}-relative 3D model paths relative to
     the cwd, so running it from the staging root produces files that are
-    already correct for their final project location — nothing to rewrite."""
+    already correct for their final project location — nothing to rewrite.
+    Unless include_3d, the 3D models are neither fetched nor referenced: their
+    (model ..) lines are stripped from the staged footprints."""
     out_dir = staging_root / relative_lib_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     seed_staged_symbol_lib(out_dir / f"{lib_name}.kicad_sym", project_symbol_lib)
@@ -586,11 +640,15 @@ def stage_parts(
     cwd = os.getcwd()
     os.chdir(staging_root)
     try:
-        return_code = easyeda_main(stage_args(out_dir / lib_name, parts))
+        return_code = easyeda_main(stage_args(out_dir / lib_name, parts, include_3d=include_3d))
     finally:
         os.chdir(cwd)
     if return_code:
         print("[import] easyeda2kicad reported errors; continuing with the parts that staged.")
+
+    if not include_3d:
+        for mod in (out_dir / f"{lib_name}.pretty").glob("*.kicad_mod"):
+            mod.write_text(_strip_3d_model_refs(mod.read_text()))
 
 
 def confirm_and_commit_parts(
@@ -711,7 +769,10 @@ def main() -> None:
     project_sym = project_root / relative_lib_dir / f"{lib_name}.kicad_sym"
 
     if args.print_args:
-        print("easyeda2kicad", *stage_args(project_root / relative_lib_dir / lib_name, parts))
+        print(
+            "easyeda2kicad",
+            *stage_args(project_root / relative_lib_dir / lib_name, parts, include_3d=args.include_3d_models),
+        )
         return
 
     interactive = not args.non_interactive and sys.stdin.isatty() and sys.stdout.isatty()
@@ -731,7 +792,9 @@ def main() -> None:
 
     staging_root = _staging_root()
     try:
-        stage_parts(parts, staging_root, relative_lib_dir, lib_name, project_sym)
+        stage_parts(
+            parts, staging_root, relative_lib_dir, lib_name, project_sym, include_3d=args.include_3d_models
+        )
         staged_sym = staging_root / relative_lib_dir / f"{lib_name}.kicad_sym"
         rename_symbol_lcsc_field(staged_sym)
 
