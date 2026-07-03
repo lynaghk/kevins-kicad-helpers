@@ -11,7 +11,10 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import sys
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 LIB_RE = re.compile(
@@ -51,7 +54,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Overwrite existing symbol/footprint/3D model instead of skipping it.",
+        help="Reimport parts the project library already has, replacing their symbol/footprint/3D model.",
+    )
+    parser.add_argument(
+        "--import-duplicates",
+        action="store_true",
+        help=(
+            "Import a copy without asking when a part is already provided by an installed "
+            "KiCad library (e.g. the JLCPCB-Kicad-Library)."
+        ),
+    )
+    parser.add_argument(
+        "--kicad-config-dir",
+        type=Path,
+        help=(
+            "Override the KiCad config dir holding the global sym-lib-table "
+            "(default: newest of ~/.config/kicad/{10.0,9.0,8.0})."
+        ),
     )
     parser.add_argument(
         "--no-standard-footprints",
@@ -82,9 +101,9 @@ def parse_args() -> argparse.Namespace:
         "--non-interactive",
         action="store_true",
         help=(
-            "Never open the footprint chooser: print the standard-footprint candidates for each "
-            "part and keep the generated footprints. Combine with --auto-single to still "
-            "substitute unambiguous matches."
+            "Never prompt: skip parts an installed library already provides, import the rest "
+            "with their generated footprints, and print the standard-footprint candidates. "
+            "Combine with --auto-single to still substitute unambiguous matches."
         ),
     )
     parser.add_argument(
@@ -194,27 +213,6 @@ def rename_symbol_lcsc_field(symbol_file: Path) -> None:
         symbol_file.write_text(updated)
 
 
-def ensure_project_library_tables(
-    project_root: Path,
-    symbol_lib: str,
-    symbol_path: Path,
-    footprint_lib: str,
-    footprint_path: Path,
-) -> None:
-    ensure_project_library_entry(
-        project_root / "sym-lib-table",
-        "sym_lib_table",
-        symbol_lib,
-        project_uri(symbol_path),
-    )
-    ensure_project_library_entry(
-        project_root / "fp-lib-table",
-        "fp_lib_table",
-        footprint_lib,
-        project_uri(footprint_path),
-    )
-
-
 def _ensure_chooser_path() -> None:
     """Put this script's own directory on sys.path so the sibling footprint
     modules import cleanly even when run via the bin/ symlink."""
@@ -232,15 +230,21 @@ def _import_chooser_modules():
     return matcher, tui
 
 
-def _symbols_by_lcsc(symbol_lib: Path) -> dict[str, dict[str, str]]:
-    """Map each symbol's LCSC id -> its property dict (Reference, Footprint, ...)."""
+@dataclass
+class SymbolInfo:
+    name: str
+    props: dict[str, str]
+
+
+def _symbols_by_lcsc(symbol_lib: Path) -> dict[str, SymbolInfo]:
+    """Map each symbol's LCSC id -> its name and property dict (Reference, Footprint, ...)."""
     _ensure_chooser_path()
     from kicad_mod_render import parse_sexpr
 
     root = parse_sexpr(symbol_lib.read_text())
-    result: dict[str, dict[str, str]] = {}
+    result: dict[str, SymbolInfo] = {}
     for node in root:
-        if not isinstance(node, list) or not node or node[0] != "symbol":
+        if not isinstance(node, list) or len(node) < 2 or node[0] != "symbol":
             continue
         props: dict[str, str] = {}
         for child in node:
@@ -248,7 +252,7 @@ def _symbols_by_lcsc(symbol_lib: Path) -> dict[str, dict[str, str]]:
                 props[str(child[1])] = str(child[2])
         lcsc = props.get("LCSC")
         if lcsc:
-            result[lcsc] = props
+            result[lcsc] = SymbolInfo(str(node[1]), props)
     return result
 
 
@@ -278,6 +282,211 @@ def _remove_generated_footprint(gen_mod: Path, project_root: Path) -> list[Path]
     return removed
 
 
+def extract_symbol_block(lib_text: str, symbol_name: str) -> str | None:
+    """The balanced `(symbol "<name>" ...)` block of a top-level symbol,
+    including its leading indentation. The scan is quote-aware (with backslash
+    escapes) so parens inside strings don't unbalance it; sub-unit symbols are
+    nested inside their parent, so scanning to balance from the top-level
+    header captures them too."""
+    match = re.search(r'^[ \t]*\(symbol\s+"' + re.escape(symbol_name) + '"', lib_text, re.MULTILINE)
+    if not match:
+        return None
+    depth = 0
+    in_string = escaped = False
+    for i in range(match.start(), len(lib_text)):
+        ch = lib_text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return lib_text[match.start() : i + 1]
+    return None
+
+
+def merge_symbol_into_lib(project_lib: Path, staged_text: str, symbol_name: str) -> None:
+    """Copy one symbol block from a staged library into the project library,
+    creating it (with the staged header, so the format version matches the
+    symbols) or replacing an existing block of the same name."""
+    block = extract_symbol_block(staged_text, symbol_name)
+    if block is None:
+        raise SystemExit(f'Staged library is missing symbol "{symbol_name}".')
+
+    if not project_lib.exists():
+        first_symbol = re.search(r'^[ \t]*\(symbol\s+"', staged_text, re.MULTILINE)
+        header = staged_text[: first_symbol.start()]
+        project_lib.parent.mkdir(parents=True, exist_ok=True)
+        project_lib.write_text(header + block + "\n)\n")
+        return
+
+    text = project_lib.read_text()
+    existing = extract_symbol_block(text, symbol_name)
+    if existing is not None:
+        text = text.replace(existing, block, 1)
+    else:
+        last = text.rfind(")")
+        if last == -1:
+            raise SystemExit(f"{project_lib} is not a valid symbol library.")
+        text = text[:last].rstrip("\n") + "\n" + block + "\n" + text[last:]
+    project_lib.write_text(text)
+
+
+def seed_staged_symbol_lib(staged_lib: Path, project_lib: Path) -> None:
+    """Give the staged library the project library's format version:
+    easyeda2kicad emits symbols in the largest dialect <= the version it reads
+    from the target file, so this keeps new blocks mergeable into the project
+    file without mixing dialects."""
+    if not project_lib.exists():
+        return
+    match = re.search(r"\(version\s+(\d+)\)", project_lib.read_text()[:512])
+    if not match:
+        return
+    staged_lib.write_text(f"(kicad_symbol_lib\n  (version {match.group(1)})\n)\n")
+
+
+def filter_already_imported(parts: list[str], symbol_lib: Path, lib_name: str, *, overwrite: bool) -> list[str]:
+    """Drop parts the project library already has (unless --overwrite)."""
+    if overwrite or not symbol_lib.exists():
+        return parts
+    index = _symbols_by_lcsc(symbol_lib)
+    kept = []
+    for part in parts:
+        info = index.get(part)
+        if info:
+            print(
+                f"[duplicates] {part}: already imported as {lib_name}:{info.name}; use --overwrite to reimport."
+            )
+        else:
+            kept.append(part)
+    return kept
+
+
+def confirm_duplicates(
+    parts: list[str],
+    installed: dict[str, list],
+    *,
+    import_duplicates: bool,
+    interactive: bool,
+    ask=input,
+) -> list[str]:
+    """Handle parts that an installed library (e.g. the JLCPCB-Kicad-Library)
+    already provides: those symbols are hand-curated and directly placeable, so
+    skipping the import is the default and the existing ref is printed instead."""
+    kept = []
+    for part in parts:
+        hits = installed.get(part)
+        if not hits:
+            kept.append(part)
+            continue
+        refs = ", ".join(h.ref for h in hits)
+        if import_duplicates:
+            print(f"[duplicates] {part}: also in your installed libraries ({refs}); importing a copy anyway.")
+            kept.append(part)
+        elif interactive:
+            print(f"[duplicates] {part} is already in your installed libraries:")
+            for h in hits:
+                print(f"[duplicates]   {h.ref}")
+            if ask(f"[duplicates] import a copy of {part} anyway? [y/N] ").strip().lower().startswith("y"):
+                kept.append(part)
+            else:
+                print(f"[duplicates] {part}: skipped — place {hits[0].ref} directly.")
+        else:
+            print(
+                f"[duplicates] {part}: already installed as {refs}; "
+                "skipping (use --import-duplicates to import a copy)."
+            )
+    return kept
+
+
+def _move_footprint_files(staged_mod: Path, staging_root: Path, project_root: Path) -> None:
+    """Move a staged footprint and the 3D models its (model ..) entries point
+    at into the project. Staging mirrors the project layout, so the
+    ${KIPRJMOD}-relative model paths inside the file stay correct as-is.
+
+    Sibling parts from the same family can share a generated footprint file; the
+    first commit moves it, so a later one finds staging empty. When the target is
+    already in the project, there is nothing to move -- reuse it."""
+    target_mod = project_root / staged_mod.relative_to(staging_root)
+    if not staged_mod.is_file() and target_mod.is_file():
+        return
+    for match in re.finditer(r'\(model\s+"([^"]+)"', staged_mod.read_text()):
+        rel = match.group(1).replace("${KIPRJMOD}/", "").replace("${KIPRJMOD}", "")
+        if Path(rel).is_absolute():
+            continue
+        staged_model = staging_root / rel
+        for ext in (staged_model.suffix, ".wrl", ".step", ".stp"):
+            sibling = staged_model.with_suffix(ext)
+            if sibling.is_file():
+                target = project_root / sibling.relative_to(staging_root)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(sibling), str(target))
+    target_mod.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(staged_mod), str(target_mod))
+
+
+def commit_part(
+    project_root: Path,
+    staging_root: Path,
+    relative_lib_dir: Path,
+    lib_name: str,
+    part: str,
+    info: SymbolInfo,
+    *,
+    keep_footprint: bool,
+    overwrite: bool,
+) -> None:
+    """Move one confirmed part from the staging tree into the project: the
+    symbol block always; the generated footprint and its 3D models only when
+    the EasyEDA footprint was kept (a substituted standard footprint lives in
+    KiCad's own libraries). Library tables are registered here, idempotently,
+    so a fully skipped run never touches the project."""
+    staged_dir = staging_root / relative_lib_dir
+    project_dir = project_root / relative_lib_dir
+    project_sym = project_dir / f"{lib_name}.kicad_sym"
+
+    if overwrite and project_sym.exists():
+        # A previous import of this part may have left a generated footprint
+        # behind; drop it before its replacement (or a standard ref) lands.
+        old = _symbols_by_lcsc(project_sym).get(part)
+        old_ref = old.props.get("Footprint", "") if old else ""
+        if old_ref.startswith(f"{lib_name}:"):
+            old_mod = project_dir / f"{lib_name}.pretty" / (old_ref.split(":", 1)[1] + ".kicad_mod")
+            _remove_generated_footprint(old_mod, project_root)
+
+    if keep_footprint:
+        fp_ref = info.props.get("Footprint", "")
+        fp_name = fp_ref.split(":", 1)[1] if ":" in fp_ref else fp_ref
+        _move_footprint_files(
+            staged_dir / f"{lib_name}.pretty" / f"{fp_name}.kicad_mod", staging_root, project_root
+        )
+
+    merge_symbol_into_lib(project_sym, (staged_dir / f"{lib_name}.kicad_sym").read_text(), info.name)
+
+    ensure_project_library_entry(
+        project_root / "sym-lib-table",
+        "sym_lib_table",
+        lib_name,
+        project_uri(relative_lib_dir / f"{lib_name}.kicad_sym"),
+    )
+    footprint_path = relative_lib_dir / f"{lib_name}.pretty"
+    if (project_root / footprint_path).is_dir():
+        ensure_project_library_entry(
+            project_root / "fp-lib-table",
+            "fp_lib_table",
+            lib_name,
+            project_uri(footprint_path),
+        )
+
+
 def _rot_note(rotation: int) -> str:
     return f" (FT Rotation Offset {rotation:+d}°)" if rotation else ""
 
@@ -304,10 +513,11 @@ def _set_symbol_property(symbol_lib: Path, lcsc_id: str, key: str, value: str) -
     symbol_lib.write_text(text[: m.end()] + block + text[m.end() :])
 
 
-def report_standard_symbols(project_root: Path, symbol_path: Path, parts: list[str], args) -> None:
+def report_standard_symbols(symbol_lib: Path, parts: list[str], args) -> None:
     """Tell the user when KiCad's standard library already has a part's symbol —
-    the import may have been unnecessary. Report-only: the imported symbol is
-    kept (deciding to use the standard one is a schematic-level choice)."""
+    the import may be unnecessary. Report-only, printed before the choosers so
+    the user can still skip the part (using the standard symbol is a
+    schematic-level choice)."""
     try:
         _ensure_chooser_path()
         import symbol_matcher
@@ -321,10 +531,10 @@ def report_standard_symbols(project_root: Path, symbol_path: Path, parts: list[s
         return
     index = symbol_matcher.load_index(root)
 
-    for part, props in _symbols_by_lcsc(project_root / symbol_path).items():
+    for part, info in _symbols_by_lcsc(symbol_lib).items():
         if part not in parts:
             continue
-        mpn = props.get("Value", "")
+        mpn = info.props.get("Value", "")
         matches = symbol_matcher.match_mpn(mpn, index)
         if not matches:
             continue
@@ -340,143 +550,201 @@ def report_standard_symbols(project_root: Path, symbol_path: Path, parts: list[s
             print(f"[symbols] {part} ({mpn}): close standard-library symbol(s): {refs} — worth checking.")
 
 
-def substitute_standard_footprints(
+def _staging_root() -> Path:
+    """A fresh staging dir, fully resolved: macOS's TMPDIR sits behind a
+    symlink (/var -> /private/var), and easyeda2kicad computes 3D model paths
+    with relative_to(Path.cwd()) where cwd is always resolved — an unresolved
+    root would make that call crash."""
+    return Path(tempfile.mkdtemp(prefix="kkh-easyeda-")).resolve()
+
+
+def stage_args(output_base: Path, parts: list[str]) -> list[str]:
+    # IDs last: easyeda2kicad has no positional for part numbers, so they must be
+    # passed via --lcsc_id. Keeping the nargs="+" list at the end matches the
+    # upstream README and avoids it swallowing a following flag. --overwrite is
+    # always safe here: the output is a fresh staging tree.
+    return ["--full", "--output", str(output_base), "--project-relative", "--overwrite", "--lcsc_id", *parts]
+
+
+def stage_parts(
+    parts: list[str],
+    staging_root: Path,
+    relative_lib_dir: Path,
+    lib_name: str,
+    project_symbol_lib: Path,
+) -> None:
+    """Download and convert into a temp tree that mirrors the project layout.
+    easyeda2kicad writes its ${KIPRJMOD}-relative 3D model paths relative to
+    the cwd, so running it from the staging root produces files that are
+    already correct for their final project location — nothing to rewrite."""
+    out_dir = staging_root / relative_lib_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    seed_staged_symbol_lib(out_dir / f"{lib_name}.kicad_sym", project_symbol_lib)
+
+    from easyeda2kicad.__main__ import main as easyeda_main
+
+    cwd = os.getcwd()
+    os.chdir(staging_root)
+    try:
+        return_code = easyeda_main(stage_args(out_dir / lib_name, parts))
+    finally:
+        os.chdir(cwd)
+    if return_code:
+        print("[import] easyeda2kicad reported errors; continuing with the parts that staged.")
+
+
+def confirm_and_commit_parts(
     project_root: Path,
-    symbol_path: Path,
-    footprint_path: Path,
+    staging_root: Path,
+    relative_lib_dir: Path,
     lib_name: str,
     parts: list[str],
     args: argparse.Namespace,
-) -> None:
-    """For each imported part, offer KiCad's standard footprint in place of the
-    generated one. Confident single matches can auto-substitute (--auto-single);
-    otherwise the interactive chooser decides, with the generated one preselected."""
+) -> list[str]:
+    """Per-part confirmation: the footprint chooser doubles as the import gate.
+    Enter imports the part with the highlighted footprint (the generated EasyEDA
+    one, or a standard-library match in its place); q/Esc skips the part without
+    writing anything into the project. Returns the parts actually imported."""
+    staged_dir = staging_root / relative_lib_dir
+    staged_sym = staged_dir / f"{lib_name}.kicad_sym"
+    index = _symbols_by_lcsc(staged_sym) if staged_sym.exists() else {}
+    interactive = not args.non_interactive and sys.stdin.isatty() and sys.stdout.isatty()
+
+    matcher = tui = fp_root = None
     try:
         matcher, tui = _import_chooser_modules()
     except Exception as exc:  # pragma: no cover - optional feature
-        print(f"[footprints] chooser unavailable ({exc}); keeping generated footprints.")
-        return
+        print(f"[import] chooser unavailable ({exc}); importing without the footprint chooser.")
+    if matcher and not args.no_standard_footprints:
+        fp_root = matcher.find_footprint_root(args.kicad_footprints_dir)
+        if not fp_root:
+            print("[footprints] KiCad standard footprint libraries not found; no standard-footprint matching.")
 
-    root = matcher.find_footprint_root(args.kicad_footprints_dir)
-    if not root:
-        print("[footprints] KiCad standard footprint libraries not found; keeping generated footprints.")
-        return
-
-    symbol_lib = project_root / symbol_path
-    footprint_dir = project_root / footprint_path
-    index = _symbols_by_lcsc(symbol_lib)
-    interactive = not args.non_interactive and sys.stdin.isatty() and sys.stdout.isatty()
-
+    committed: list[str] = []
     for part in parts:
-        props = index.get(part)
-        if not props:
+        info = index.get(part)
+        if not info:
+            print(f"[import] {part}: download failed; nothing imported.")
             continue
-        fp_ref = props.get("Footprint", "")
-        if ":" not in fp_ref:
-            continue
-        _, fp_name = fp_ref.split(":", 1)
-        gen_mod = footprint_dir / f"{fp_name}.kicad_mod"
-        if not gen_mod.exists():
-            continue
+        fp_ref = info.props.get("Footprint", "")
+        fp_name = fp_ref.split(":", 1)[1] if ":" in fp_ref else ""
+        gen_mod = staged_dir / f"{lib_name}.pretty" / f"{fp_name}.kicad_mod"
+        # A sibling part from the same family may have already committed this exact
+        # footprint, moving it out of staging; then it lives in the project instead.
+        project_mod = project_root / relative_lib_dir / f"{lib_name}.pretty" / f"{fp_name}.kicad_mod"
+        fp_available = gen_mod.exists() or project_mod.exists()
 
-        comp_type = (props.get("Reference") or "")[:1] or None
-        matches = matcher.find_candidates(gen_mod, root, comp_type=comp_type)
-        if not matches:
-            print(f"[footprints] {part}: no standard match, kept {fp_ref}")
-            continue
+        matches = []
+        if fp_root and gen_mod.exists():
+            comp_type = (info.props.get("Reference") or "")[:1] or None
+            matches = matcher.find_candidates(gen_mod, fp_root, comp_type=comp_type)
 
+        chosen_ref = None  # None = keep the generated EasyEDA footprint
         rotation = 0
         if args.auto_single and len(matches) == 1:
             chosen_ref = matches[0].ref
             rotation = tui.suggest_rotation(tui.load_footprint(gen_mod), tui.load_footprint(matches[0].path))
-            print(f"[footprints] {part}: auto-substituted {fp_ref} -> {chosen_ref}{_rot_note(rotation)}")
-        elif interactive:
+        elif interactive and tui and gen_mod.exists() and matches:
             candidates = [
-                tui.Candidate(f"EasyEDA: {fp_name}", gen_mod, fp_ref, "EasyEDA (keep)"),
+                tui.Candidate(f"{part} EasyEDA: {fp_name}", gen_mod, fp_ref, "EasyEDA (import as-is)"),
                 *[tui.Candidate(m.ref, m.path, m.ref) for m in matches],
             ]
             try:
                 result = tui.choose(candidates, preselect=0, reference_index=0)
             except KeyboardInterrupt:
-                # Ctrl-C: stop choosing but keep everything already imported/substituted.
-                print(f"[footprints] aborted at {part}; it and remaining parts keep their EasyEDA footprints.")
+                print(f"[import] aborted; {part} and remaining parts were not imported.")
                 break
             if result is None:
-                print(f"[footprints] {part}: kept {fp_ref}")
+                print(f"[import] {part}: skipped.")
                 continue
             chosen, rotation = result
-            if chosen.ref == fp_ref:
-                print(f"[footprints] {part}: kept {fp_ref}")
+            if chosen.ref != fp_ref:
+                chosen_ref = chosen.ref
+        elif interactive and fp_available:
+            # Nothing to choose — either no alternatives, or the footprint was
+            # already committed by a sibling part sharing it. Import the generated
+            # EasyEDA footprint without an empty chooser or a pointless prompt.
+            pass
+        elif interactive:
+            # No footprint to preview (rare: footprint export failed) — still
+            # confirm before anything lands in the project.
+            if input(f"[import] {part}: import symbol {info.name}? [Y/n] ").strip().lower().startswith("n"):
+                print(f"[import] {part}: skipped.")
                 continue
-            chosen_ref = chosen.ref
-            print(f"[footprints] {part}: substituted {fp_ref} -> {chosen_ref}{_rot_note(rotation)}")
-        else:
-            print(f"[footprints] {part}: {len(matches)} standard candidate(s) for {fp_ref}; kept generated.")
+        elif matches:
+            print(f"[footprints] {part}: {len(matches)} standard candidate(s) for {fp_ref}; keeping generated.")
             for m in matches[:5]:
                 print(f"[footprints]   {m.ref}  (pad-area mismatch {m.mismatch}, rot {m.rotation:+d}°)")
             if len(matches) > 5:
                 print(f"[footprints]   ... and {len(matches) - 5} more")
-            continue
 
-        text = symbol_lib.read_text()
-        symbol_lib.write_text(text.replace(f'"{fp_ref}"', f'"{chosen_ref}"'))
-        if rotation:
-            _set_symbol_property(symbol_lib, part, "FT Rotation Offset", str(rotation))
-
-        removed = _remove_generated_footprint(gen_mod, project_root)
-        if removed:
-            print(f"[footprints] {part}: removed EasyEDA {', '.join(p.name for p in removed)}")
+        keep = chosen_ref is None
+        if not keep:
+            text = staged_sym.read_text()
+            staged_sym.write_text(text.replace(f'"{fp_ref}"', f'"{chosen_ref}"'))
+            if rotation:
+                _set_symbol_property(staged_sym, part, "FT Rotation Offset", str(rotation))
+        commit_part(
+            project_root,
+            staging_root,
+            relative_lib_dir,
+            lib_name,
+            part,
+            info,
+            keep_footprint=keep,
+            overwrite=args.overwrite,
+        )
+        committed.append(part)
+        with_note = "" if keep else f", footprint {chosen_ref}{_rot_note(rotation)}"
+        print(f"[import] {part}: imported as {lib_name}:{info.name}{with_note}")
+    return committed
 
 
 def main() -> None:
     args = parse_args()
     validate_parts(args.parts)
+    parts = list(dict.fromkeys(args.parts))
 
     project_root, project_file = resolve_project(args.project)
-    default_lib_name = f"0_{project_file.stem}"
-
-    os.chdir(project_root)
-
-    lib_name = args.lib_name or default_lib_name
+    lib_name = args.lib_name or f"0_{project_file.stem}"
     relative_lib_dir = project_relative_path(project_root, args.lib_dir)
-    symbol_path = relative_lib_dir / f"{lib_name}.kicad_sym"
-    footprint_path = relative_lib_dir / f"{lib_name}.pretty"
-    # easyeda2kicad's --project-relative does Path(f"{output}.3dshapes").relative_to(cwd),
-    # which requires an absolute --output. cwd is the project root (we chdir above),
-    # so the absolute base still yields a ${KIPRJMOD}-relative 3D model path.
-    output_base = project_root / relative_lib_dir / lib_name
-
-    easyeda_args = [
-        "--full",
-        "--output",
-        str(output_base),
-        "--project-relative",
-    ]
-    if args.overwrite:
-        easyeda_args.append("--overwrite")
-    # IDs last: easyeda2kicad has no positional for part numbers, so they must be
-    # passed via --lcsc_id. Keeping the nargs="+" list at the end matches the
-    # upstream README and avoids it swallowing a following flag.
-    easyeda_args += ["--lcsc_id", *args.parts]
+    project_sym = project_root / relative_lib_dir / f"{lib_name}.kicad_sym"
 
     if args.print_args:
-        print("easyeda2kicad", *easyeda_args)
+        print("easyeda2kicad", *stage_args(project_root / relative_lib_dir / lib_name, parts))
         return
 
-    from easyeda2kicad.__main__ import main as easyeda_main
+    interactive = not args.non_interactive and sys.stdin.isatty() and sys.stdout.isatty()
 
-    return_code = easyeda_main(easyeda_args)
-    if return_code:
-        raise SystemExit(return_code)
+    parts = filter_already_imported(parts, project_sym, lib_name, overwrite=args.overwrite)
+    if parts:
+        _ensure_chooser_path()
+        import installed_libs
 
-    rename_symbol_lcsc_field(project_root / symbol_path)
-    ensure_project_library_tables(project_root, lib_name, symbol_path, lib_name, footprint_path)
+        installed = installed_libs.find_installed(parts, installed_libs.kicad_config_dir(args.kicad_config_dir))
+        parts = confirm_duplicates(
+            parts, installed, import_duplicates=args.import_duplicates, interactive=interactive
+        )
+    if not parts:
+        print("[import] nothing to import.")
+        return
 
-    if not args.no_standard_symbols:
-        report_standard_symbols(project_root, symbol_path, args.parts, args)
+    staging_root = _staging_root()
+    try:
+        stage_parts(parts, staging_root, relative_lib_dir, lib_name, project_sym)
+        staged_sym = staging_root / relative_lib_dir / f"{lib_name}.kicad_sym"
+        rename_symbol_lcsc_field(staged_sym)
 
-    if not args.no_standard_footprints:
-        substitute_standard_footprints(project_root, symbol_path, footprint_path, lib_name, args.parts, args)
+        if not args.no_standard_symbols:
+            report_standard_symbols(staged_sym, parts, args)
+
+        committed = confirm_and_commit_parts(
+            project_root, staging_root, relative_lib_dir, lib_name, parts, args
+        )
+        if not committed:
+            print("[import] no parts imported; project untouched.")
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

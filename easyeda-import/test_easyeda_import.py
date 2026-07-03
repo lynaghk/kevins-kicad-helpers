@@ -22,6 +22,7 @@ from pathlib import Path
 import footprint_chooser_tui as tui
 import footprint_matcher as matcher
 import import_easyeda_parts as imp
+import installed_libs as inst
 import kicad_mod_render as R
 import symbol_matcher as sym
 
@@ -292,7 +293,9 @@ def test_frames_erase_stale_text_and_peek_shows_reference():
     shutil.get_terminal_size = lambda fallback=(90, 40): os.terminal_size((80, 30))
     try:
         cands = [
-            tui.Candidate("EasyEDA: SOT-23-5_L3.0", _TMP / "easyeda_sot23_5.kicad_mod", "e", "EasyEDA (keep)"),
+            tui.Candidate(
+                "EasyEDA: SOT-23-5_L3.0", _TMP / "easyeda_sot23_5.kicad_mod", "e", "EasyEDA (import as-is)"
+            ),
             tui.Candidate("Package_TO_SOT_SMD:SOT-23-5", _TMP / "kicad_sot23_5.kicad_mod", "k"),
         ]
         fps = [tui.load_footprint(c.path) for c in cands]
@@ -356,7 +359,8 @@ def test_symbols_by_lcsc_index():
     lib = _TMP / "index.kicad_sym"
     lib.write_text(SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"'))
     index = imp._symbols_by_lcsc(lib)
-    assert index["C5123975"]["Footprint"].startswith("0_test:")
+    assert index["C5123975"].name == "LGS6302"
+    assert index["C5123975"].props["Footprint"].startswith("0_test:")
 
 
 def test_remove_generated_footprint_removes_models_keeps_others():
@@ -495,6 +499,359 @@ def test_symbol_index_cache_reused_and_invalidated():
         assert "CANARY" not in rebuilt and sym.normalize("PARTTWO") in rebuilt
     finally:
         os.environ.pop("XDG_CACHE_HOME", None)
+
+
+# --------------------------------------------------------------------------- #
+# confirm-before-import: staging, symbol merge, and per-part commit
+# --------------------------------------------------------------------------- #
+GEN_FP_NAME = "SOT-23-5_L3.0-W1.6-P0.95-LS2.8-BL"
+
+
+def _staged_tree(staging: Path) -> Path:
+    """A staged easyeda2kicad output tree mirroring the project layout: one
+    symbol whose 3D model name differs from the footprint name (they often do)."""
+    staging.mkdir(parents=True, exist_ok=True)
+    (staging / "0_test.pretty").mkdir(exist_ok=True)
+    (staging / "0_test.3dshapes").mkdir(exist_ok=True)
+    staged_sym = staging / "0_test.kicad_sym"
+    staged_sym.write_text(SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"'))
+    (staging / f"0_test.pretty/{GEN_FP_NAME}.kicad_mod").write_text(
+        '(module x (layer F.Cu)\n  (model "${KIPRJMOD}/0_test.3dshapes/SOT-23-5.wrl")\n)'
+    )
+    (staging / "0_test.3dshapes/SOT-23-5.wrl").write_text("wrl")
+    (staging / "0_test.3dshapes/SOT-23-5.step").write_text("step")
+    return staged_sym
+
+
+def test_extract_symbol_block_balanced_and_missing():
+    block = imp.extract_symbol_block(SYMBOL_LIB, "LGS6302")
+    assert block is not None
+    assert block.lstrip().startswith('(symbol "LGS6302"')
+    assert block.count("(") == block.count(")")
+    assert '"C5123975"' in block
+    assert imp.extract_symbol_block(SYMBOL_LIB, "LGS630") is None
+    assert imp.extract_symbol_block(SYMBOL_LIB, "NOPE") is None
+
+
+def test_merge_symbol_into_lib_creates_appends_replaces():
+    staged_text = SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"')
+    lib = _TMP / "merge/0_test.kicad_sym"
+    lib.parent.mkdir(exist_ok=True)
+    if lib.exists():
+        lib.unlink()
+    imp.merge_symbol_into_lib(lib, staged_text, "LGS6302")
+    text = lib.read_text()
+    assert text.count('(symbol "LGS6302"') == 1
+    assert "(version 20211014)" in text  # header carried over from the staged lib
+    assert R.parse_sexpr(text)[0] == "kicad_symbol_lib"
+    # a second part appends without duplicating the first
+    other = staged_text.replace("LGS6302", "OTHER1").replace("C5123975", "C111")
+    imp.merge_symbol_into_lib(lib, other, "OTHER1")
+    assert lib.read_text().count("(symbol ") == 2
+    # re-merging an existing symbol replaces it instead of duplicating
+    imp.merge_symbol_into_lib(lib, staged_text.replace("SOT-23-5", "SOIC-8"), "LGS6302")
+    text = lib.read_text()
+    assert text.count('(symbol "LGS6302"') == 1 and "SOIC-8" in text
+    assert text.count("(symbol ") == 2
+    assert R.parse_sexpr(text)[0] == "kicad_symbol_lib"
+
+
+def test_commit_part_keep_easyeda_moves_files_and_registers():
+    staging = _TMP / "commit-keep/staging"
+    project = _TMP / "commit-keep/project"
+    staged_sym = _staged_tree(staging)
+    project.mkdir(parents=True, exist_ok=True)
+    info = imp._symbols_by_lcsc(staged_sym)["C5123975"]
+    imp.commit_part(
+        project, staging, Path("."), "0_test", "C5123975", info, keep_footprint=True, overwrite=False
+    )
+    mod = project / f"0_test.pretty/{GEN_FP_NAME}.kicad_mod"
+    assert mod.exists() and not (staging / f"0_test.pretty/{GEN_FP_NAME}.kicad_mod").exists()
+    # the model files moved by their (model ..) entry, path text untouched
+    assert (project / "0_test.3dshapes/SOT-23-5.wrl").exists()
+    assert (project / "0_test.3dshapes/SOT-23-5.step").exists()
+    assert '"${KIPRJMOD}/0_test.3dshapes/SOT-23-5.wrl"' in mod.read_text()
+    sym_text = (project / "0_test.kicad_sym").read_text()
+    assert '(symbol "LGS6302"' in sym_text and '"C5123975"' in sym_text
+    assert '(uri "${KIPRJMOD}/0_test.kicad_sym")' in (project / "sym-lib-table").read_text()
+    assert '(uri "${KIPRJMOD}/0_test.pretty")' in (project / "fp-lib-table").read_text()
+
+
+def test_commit_part_standard_footprint_moves_nothing():
+    staging = _TMP / "commit-std/staging"
+    project = _TMP / "commit-std/project"
+    staged_sym = _staged_tree(staging)
+    project.mkdir(parents=True, exist_ok=True)
+    # the chooser substituted a standard footprint before the commit
+    staged_sym.write_text(
+        staged_sym.read_text().replace(f'"0_test:{GEN_FP_NAME}"', '"Package_TO_SOT_SMD:SOT-23-5"')
+    )
+    info = imp._symbols_by_lcsc(staged_sym)["C5123975"]
+    imp.commit_part(
+        project, staging, Path("."), "0_test", "C5123975", info, keep_footprint=False, overwrite=False
+    )
+    assert '"Package_TO_SOT_SMD:SOT-23-5"' in (project / "0_test.kicad_sym").read_text()
+    # no generated footprint or 3D models land in the project, and no footprint
+    # library gets registered for a .pretty that does not exist
+    assert not (project / "0_test.pretty").exists()
+    assert not (project / "0_test.3dshapes").exists()
+    assert not (project / "fp-lib-table").exists()
+    assert '(uri "${KIPRJMOD}/0_test.kicad_sym")' in (project / "sym-lib-table").read_text()
+
+
+def test_commit_part_overwrite_replaces_symbol_and_removes_old_footprint():
+    staging = _TMP / "commit-ow/staging"
+    project = _TMP / "commit-ow/project"
+    staged_sym = _staged_tree(staging)
+    # existing project import of the same part, with its generated footprint
+    (project / "0_test.pretty").mkdir(parents=True, exist_ok=True)
+    (project / "0_test.3dshapes").mkdir(exist_ok=True)
+    (project / "0_test.kicad_sym").write_text(
+        SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"').replace(f"0_test:{GEN_FP_NAME}", "0_test:OLDFP")
+    )
+    (project / "0_test.pretty/OLDFP.kicad_mod").write_text(
+        '(module x (layer F.Cu)\n  (model "${KIPRJMOD}/0_test.3dshapes/OLDFP.wrl")\n)'
+    )
+    (project / "0_test.3dshapes/OLDFP.wrl").write_text("old")
+    # re-import chooses a standard footprint this time
+    staged_sym.write_text(
+        staged_sym.read_text().replace(f'"0_test:{GEN_FP_NAME}"', '"Package_TO_SOT_SMD:SOT-23-5"')
+    )
+    info = imp._symbols_by_lcsc(staged_sym)["C5123975"]
+    imp.commit_part(
+        project, staging, Path("."), "0_test", "C5123975", info, keep_footprint=False, overwrite=True
+    )
+    text = (project / "0_test.kicad_sym").read_text()
+    assert text.count('(symbol "LGS6302"') == 1
+    assert '"Package_TO_SOT_SMD:SOT-23-5"' in text and "OLDFP" not in text
+    assert not (project / "0_test.pretty/OLDFP.kicad_mod").exists()
+    assert not (project / "0_test.3dshapes/OLDFP.wrl").exists()
+
+
+def test_commit_part_shared_footprint_second_part_reuses_first():
+    # Two parts from the same family export the SAME generated footprint file.
+    # The first commit moves it into the project; the second must not crash when
+    # its staged copy is already gone -- it reuses the one already committed.
+    staging = _TMP / "commit-shared/staging"
+    project = _TMP / "commit-shared/project"
+    staged_sym = _staged_tree(staging)
+    project.mkdir(parents=True, exist_ok=True)
+    info = imp._symbols_by_lcsc(staged_sym)["C5123975"]
+    imp.commit_part(
+        project, staging, Path("."), "0_test", "C5123975", info, keep_footprint=True, overwrite=False
+    )
+    mod = project / f"0_test.pretty/{GEN_FP_NAME}.kicad_mod"
+    assert mod.exists() and not (staging / f"0_test.pretty/{GEN_FP_NAME}.kicad_mod").exists()
+    # a second part with the identical footprint: its staged copy is already gone,
+    # so the move must be a no-op reusing the one already committed, not a crash
+    imp.commit_part(
+        project, staging, Path("."), "0_test", "C5123975", info, keep_footprint=True, overwrite=False
+    )
+    assert mod.exists()  # still present, no FileNotFoundError on the missing staged file
+
+
+def test_staging_root_resolves_symlinked_tmpdir():
+    # macOS TMPDIR lives under /var -> /private/var; easyeda2kicad computes the
+    # 3D model path with relative_to(Path.cwd()), and cwd is always fully
+    # resolved, so an unresolved staging root makes it crash. Simulate the
+    # symlink and require the staging root to come back resolved.
+    import os
+    import tempfile as tf
+
+    real = _TMP / "real-tmp"
+    real.mkdir(exist_ok=True)
+    link = _TMP / "link-tmp"
+    if not link.is_symlink():
+        link.symlink_to(real)
+    old_tmpdir = os.environ.get("TMPDIR")
+    os.environ["TMPDIR"] = str(link)
+    tf.tempdir = None  # drop the cached location so TMPDIR is re-read
+    try:
+        root = imp._staging_root()
+        try:
+            assert root == root.resolve()
+            assert root.is_dir()
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+    finally:
+        if old_tmpdir is None:
+            os.environ.pop("TMPDIR", None)
+        else:
+            os.environ["TMPDIR"] = old_tmpdir
+        tf.tempdir = None
+
+
+def test_seed_staged_symbol_lib_copies_version():
+    project_lib = _TMP / "seed/0_test.kicad_sym"
+    project_lib.parent.mkdir(exist_ok=True)
+    project_lib.write_text("(kicad_symbol_lib\n  (version 20241209)\n)\n")
+    staged = _TMP / "seed/staged.kicad_sym"
+    if staged.exists():
+        staged.unlink()
+    imp.seed_staged_symbol_lib(staged, project_lib)
+    assert "(version 20241209)" in staged.read_text()
+    staged.unlink()
+    imp.seed_staged_symbol_lib(staged, _TMP / "seed/missing.kicad_sym")
+    assert not staged.exists()
+
+
+# --------------------------------------------------------------------------- #
+# duplicate policy: already imported into the project / already installed
+# --------------------------------------------------------------------------- #
+def test_filter_already_imported():
+    lib = _TMP / "dupproj/0_test.kicad_sym"
+    lib.parent.mkdir(exist_ok=True)
+    lib.write_text(SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"'))
+    assert imp.filter_already_imported(["C5123975", "C42"], lib, "0_test", overwrite=False) == ["C42"]
+    # --overwrite reimports on purpose; a missing library has no duplicates
+    assert imp.filter_already_imported(["C5123975"], lib, "0_test", overwrite=True) == ["C5123975"]
+    missing = _TMP / "dupproj/none.kicad_sym"
+    assert imp.filter_already_imported(["C1"], missing, "x", overwrite=False) == ["C1"]
+
+
+def test_confirm_duplicates_policies():
+    hits = {"C1": [inst.InstalledSymbol("PCM_X:Foo", "C1")]}
+    parts = ["C1", "C2"]
+    # non-interactive runs keep only non-duplicates
+    assert imp.confirm_duplicates(parts, hits, import_duplicates=False, interactive=False) == ["C2"]
+    # --import-duplicates forces a copy without asking
+    assert imp.confirm_duplicates(parts, hits, import_duplicates=True, interactive=False) == parts
+    # interactively the answer decides; default (empty answer) is skip
+    assert (
+        imp.confirm_duplicates(parts, hits, import_duplicates=False, interactive=True, ask=lambda _: "y")
+        == parts
+    )
+    assert imp.confirm_duplicates(parts, hits, import_duplicates=False, interactive=True, ask=lambda _: "") == [
+        "C2"
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# installed-library duplicate detection (feature: prefer libraries the user
+# already has — e.g. the CDFER JLCPCB-Kicad-Library — over a fresh import)
+# --------------------------------------------------------------------------- #
+INSTALLED_SYMBOL_LIB = """\
+(kicad_symbol_lib
+  (version 20241209)
+  (symbol "Crystal, 11MHz, 20pF"
+    (property "Value" "X322511MOB4SI")
+    (property "LCSC" "C112574")
+    (symbol "Crystal, 11MHz, 20pF_0_1" (rectangle (start -5 5) (end 5 -5)))
+  )
+  (symbol "AMS1117-3.3"
+    (property "LCSC Part" "C6186")
+  )
+  (symbol "C99999")
+)
+"""
+
+
+def _installed_tree() -> tuple[Path, Path]:
+    """A fake KiCad config dir + 3rdparty dir: one registered PCM library, one
+    unregistered .kicad_sym next to it, and one table entry with a URI that
+    cannot be resolved."""
+    config = _TMP / "kicad-config/10.0"
+    third = _TMP / "kicad-3rdparty"
+    pkg = third / "symbols/com_test_pkg"
+    pkg.mkdir(parents=True, exist_ok=True)
+    config.mkdir(parents=True, exist_ok=True)
+    (pkg / "JLCPCB-Crystals.kicad_sym").write_text(INSTALLED_SYMBOL_LIB)
+    (pkg / "Unregistered.kicad_sym").write_text('(kicad_symbol_lib (symbol "Foo" (property "LCSC" "C77777")))')
+    (config / "sym-lib-table").write_text(
+        "(sym_lib_table\n"
+        "  (version 7)\n"
+        '  (lib (name "PCM_JLCPCB-Crystals")(type "KiCad")'
+        '(uri "${KICAD10_3RD_PARTY}/symbols/com_test_pkg/JLCPCB-Crystals.kicad_sym")'
+        '(options "")(descr ""))\n'
+        '  (lib (name "Broken")(type "KiCad")(uri "${NOPE}/x.kicad_sym")(options "")(descr ""))\n'
+        ")\n"
+    )
+    return config, third
+
+
+def test_expand_kicad_vars():
+    vars = {"KICAD10_3RD_PARTY": "/third"}
+    assert inst.expand_kicad_vars("${KICAD10_3RD_PARTY}/symbols/a.kicad_sym", vars) == Path(
+        "/third/symbols/a.kicad_sym"
+    )
+    assert inst.expand_kicad_vars("/plain/path.kicad_sym", vars) == Path("/plain/path.kicad_sym")
+    # unresolvable variables mean "skip this library", not a crash
+    assert inst.expand_kicad_vars("${NOPE}/x.kicad_sym", vars) is None
+    assert inst.expand_kicad_vars("${KIPRJMOD}/x.kicad_sym", vars) is None
+
+
+def test_discover_symbol_libs_merges_table_and_3rdparty_scan():
+    config, third = _installed_tree()
+    libs = dict(inst.discover_symbol_libs(config, third_party=third))
+    assert libs["PCM_JLCPCB-Crystals"].name == "JLCPCB-Crystals.kicad_sym"
+    # a .kicad_sym present in 3rdparty but missing from the table still counts,
+    # under a synthesized PCM nickname
+    assert libs["PCM_Unregistered"].name == "Unregistered.kicad_sym"
+    # the unresolvable entry is skipped, and the registered file is not duplicated
+    assert "Broken" not in libs
+    assert len(libs) == 2
+
+
+def test_find_installed_matches_lcsc_property_and_symbol_name():
+    config, third = _installed_tree()
+    parts = ["C112574", "C6186", "C99999", "C77777", "C55555"]
+    found = inst.find_installed(parts, config, third_party=third)
+    assert [s.ref for s in found["C112574"]] == ["PCM_JLCPCB-Crystals:Crystal, 11MHz, 20pF"]
+    # the "LCSC Part" property spelling is accepted too
+    assert [s.ref for s in found["C6186"]] == ["PCM_JLCPCB-Crystals:AMS1117-3.3"]
+    # a symbol literally named after the C-number counts even without a property
+    assert [s.ref for s in found["C99999"]] == ["PCM_JLCPCB-Crystals:C99999"]
+    assert [s.ref for s in found["C77777"]] == ["PCM_Unregistered:Foo"]
+    assert "C55555" not in found
+    # sub-unit symbols must never be reported as the match
+    assert not any("_0_1" in s.ref for hits in found.values() for s in hits)
+
+
+def test_kicad_config_dir_finds_macos_preferences():
+    import os
+
+    fake_home = _TMP / "machome"
+    (fake_home / "Library/Preferences/kicad/10.0").mkdir(parents=True, exist_ok=True)
+    old_home, old_xdg = os.environ.get("HOME"), os.environ.get("XDG_CONFIG_HOME")
+    os.environ["HOME"] = str(fake_home)
+    os.environ.pop("XDG_CONFIG_HOME", None)
+    try:
+        assert inst.kicad_config_dir() == fake_home / "Library/Preferences/kicad/10.0"
+    finally:
+        os.environ["HOME"] = old_home
+        if old_xdg is not None:
+            os.environ["XDG_CONFIG_HOME"] = old_xdg
+
+
+def test_default_third_party_dir_kicad_common_and_macos_default():
+    import json
+    import os
+
+    config = _TMP / "tp-config/10.0"
+    config.mkdir(parents=True, exist_ok=True)
+    # 1. an explicit path configured in KiCad's own settings wins
+    custom = _TMP / "tp-custom"
+    (config / "kicad_common.json").write_text(
+        json.dumps({"environment": {"vars": {"KICAD10_3RD_PARTY": str(custom)}}})
+    )
+    assert inst.default_third_party_dir(config) == custom
+    # 2. otherwise fall back to the platform defaults that actually exist
+    (config / "kicad_common.json").write_text(json.dumps({"environment": {"vars": None}}))
+    fake_home = _TMP / "machome2"
+    (fake_home / "Documents/KiCad/10.0/3rdparty").mkdir(parents=True, exist_ok=True)
+    old_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(fake_home)
+    try:
+        assert inst.default_third_party_dir(config) == fake_home / "Documents/KiCad/10.0/3rdparty"
+    finally:
+        os.environ["HOME"] = old_home
+
+
+def test_find_installed_without_config_or_libs_is_empty():
+    empty_config = _TMP / "kicad-config-empty/10.0"
+    empty_config.mkdir(parents=True, exist_ok=True)
+    assert inst.find_installed(["C1"], empty_config, third_party=_TMP / "missing-3rdparty") == {}
+    assert inst.find_installed(["C1"], None, third_party=_TMP / "missing-3rdparty") == {}
 
 
 def main() -> int:

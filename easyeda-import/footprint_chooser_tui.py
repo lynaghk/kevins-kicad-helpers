@@ -217,7 +217,7 @@ def _build_frame(
     title = f"\x1b[1m{cur.label}\x1b[0m  \x1b[2m({side_tag})\x1b[0m{rot_tag}{peek_tag}"
     help_line = (
         f"\x1b[2m[{selected + 1}/{len(candidates)}]  "
-        f"↑/↓ compare   f flip   r rotate   space peek   Enter select   q keep EasyEDA   ? help\x1b[0m"
+        f"↑/↓ compare   f flip   r rotate   space peek   Enter import   q skip part   ? help\x1b[0m"
     )
     list_lines = _render_list(candidates, selected, cols)
 
@@ -255,8 +255,8 @@ HELP_LINES = [
     "  space      peek the EasyEDA footprint (hold)",
     "  f          flip front / back",
     "  r          rotate 90° (sets FT Rotation Offset)",
-    "  Enter      select highlighted",
-    "  q / Esc    cancel (keep EasyEDA footprint)",
+    "  Enter      import with the highlighted footprint",
+    "  q / Esc    skip this part (import nothing)",
     "  ? / h      this help",
     "",
     "  press any key to close",
