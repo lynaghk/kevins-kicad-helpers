@@ -554,11 +554,64 @@ def _set_symbol_property(symbol_lib: Path, lcsc_id: str, key: str, value: str) -
     indent = m.group("indent")
     ids = [int(n) for n in re.findall(r"\(id (\d+)\)", text)]
     new_id = (max(ids) + 1) if ids else 100
+    quoted = value.replace("\\", "\\\\").replace('"', '\\"')
     block = (
-        f'\n{indent}(property "{key}" "{value}" (id {new_id}) (at 0 0 0)'
+        f'\n{indent}(property "{key}" "{quoted}" (id {new_id}) (at 0 0 0)'
         f" (effects (font (size 1.27 1.27) ) hide))"
     )
     symbol_lib.write_text(text[: m.end()] + block + text[m.end() :])
+
+
+def _fetch_jlcpcb_descriptions(parts: list[str]) -> dict[str, str]:
+    """Look each part up in the JLCPCB parts catalog (anonymous keyword search)
+    and return its spec-style description."""
+    from easyeda2kicad.easyeda.easyeda_api import EasyedaApi
+
+    api = EasyedaApi()
+    found: dict[str, str] = {}
+    for part in parts:
+        response = api.search_jlcpcb_components(keyword=part, page_size=5)
+        for hit in response.get("results", []):
+            if hit.get("lcsc") == part and hit.get("description"):
+                found[part] = hit["description"]
+                break
+    return found
+
+
+def add_missing_descriptions(symbol_lib: Path, parts: list[str], fetch=_fetch_jlcpcb_descriptions) -> None:
+    """easyeda2kicad only emits a description property when the EasyEDA CAD
+    data carries one, and for most parts that field is empty — the imported
+    symbol then shows nothing in KiCad's symbol chooser. The JLCPCB catalog
+    almost always has one, so fill the gap from there. The property key follows
+    the library's format version, matching what easyeda2kicad would have
+    written itself; failures only cost the description, never the import."""
+    if not symbol_lib.exists():
+        return
+    index = _symbols_by_lcsc(symbol_lib)
+    missing = [
+        part
+        for part in parts
+        if part in index
+        and not (index[part].props.get("Description") or index[part].props.get("ki_description"))
+    ]
+    if not missing:
+        return
+
+    try:
+        descriptions = fetch(missing)
+    except Exception as exc:
+        print(f"[descriptions] JLCPCB lookup failed ({exc}); symbols imported without descriptions.")
+        return
+
+    version_match = re.search(r"\(version\s+(\d+)\)", symbol_lib.read_text()[:512])
+    modern = version_match and int(version_match.group(1)) >= 20230620
+    key = "Description" if modern else "ki_description"
+    for part in missing:
+        description = descriptions.get(part)
+        if description:
+            _set_symbol_property(symbol_lib, part, key, description)
+        else:
+            print(f"[descriptions] {part}: not found in the JLCPCB catalog; imported without a description.")
 
 
 def report_standard_symbols(symbol_lib: Path, parts: list[str], args) -> None:
@@ -797,6 +850,7 @@ def main() -> None:
         )
         staged_sym = staging_root / relative_lib_dir / f"{lib_name}.kicad_sym"
         rename_symbol_lcsc_field(staged_sym)
+        add_missing_descriptions(staged_sym, parts)
 
         if not args.no_standard_symbols:
             report_standard_symbols(staged_sym, parts, args)

@@ -363,6 +363,49 @@ def test_symbols_by_lcsc_index():
     assert index["C5123975"].props["Footprint"].startswith("0_test:")
 
 
+def test_add_missing_descriptions_fills_only_missing_symbols():
+    lib = _TMP / "desc.kicad_sym"
+    lib.write_text(SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"'))
+    fetched = []
+
+    def fetch(parts):
+        fetched.append(list(parts))
+        return {"C5123975": 'LDO 3.3V 300mA "low-noise" SOT-23-5'}
+
+    imp.add_missing_descriptions(lib, ["C5123975"], fetch=fetch)
+    text = lib.read_text()
+    # version 20211014 lib -> legacy ki_description key, quotes escaped
+    assert fetched == [["C5123975"]]
+    assert '(property "ki_description" "LDO 3.3V 300mA \\"low-noise\\" SOT-23-5"' in text
+    root = R.parse_sexpr(text)  # still a well-formed s-expression
+    assert root and root[0] == "kicad_symbol_lib"
+
+    # a symbol that already has a description is left alone (fetch not called)
+    imp.add_missing_descriptions(lib, ["C5123975"], fetch=fetch)
+    assert fetched == [["C5123975"]]
+    assert lib.read_text() == text
+
+
+def test_add_missing_descriptions_uses_modern_key_for_new_libs():
+    lib = _TMP / "desc_new.kicad_sym"
+    lib.write_text(
+        SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"').replace("(version 20211014)", "(version 20241209)")
+    )
+    imp.add_missing_descriptions(lib, ["C5123975"], fetch=lambda parts: {"C5123975": "LDO"})
+    assert '(property "Description" "LDO"' in lib.read_text()
+
+
+def test_add_missing_descriptions_survives_fetch_failure():
+    lib = _TMP / "desc_fail.kicad_sym"
+    lib.write_text(SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"'))
+
+    def fetch(parts):
+        raise OSError("network down")
+
+    imp.add_missing_descriptions(lib, ["C5123975"], fetch=fetch)  # must not raise
+    assert "ki_description" not in lib.read_text()
+
+
 def test_remove_generated_footprint_removes_models_keeps_others():
     proj = _TMP / "rmproj"
     (proj / "lib.pretty").mkdir(parents=True, exist_ok=True)
