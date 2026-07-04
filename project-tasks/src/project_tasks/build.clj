@@ -34,13 +34,9 @@
   (let [version (shared/build-version repo-dir)
         outputs (fs/path project-dir "outputs" version)
         schematics-outputs (fs/path outputs "schematics")
-        models-outputs (fs/path outputs "models")
-        production-outputs (fs/path outputs "production")
         toolkit-outputs (fs/path project-dir "production")]
     (fs/delete-tree outputs)
     (fs/create-dirs schematics-outputs)
-    (fs/create-dirs models-outputs)
-    (fs/create-dirs production-outputs)
     (shared/kicad-cli!
      project-dir
      ["sch" "export" "pdf"
@@ -67,7 +63,7 @@
     (shared/step-export!
      project-dir
      ["--keep-full"
-      "-o" (str (fs/path models-outputs (str project-name ".simplified.step")))
+      "-o" (str (fs/path outputs (str project-name ".simplified.step")))
       (str pcb)])
     (shared/run-fabrication-toolkit!
      project-dir
@@ -78,13 +74,9 @@
       "--nonInteractive"
       "--noBackup"])
     (filter-positions-to-bom! toolkit-outputs)
-    (shared/copy-non-zip-contents! toolkit-outputs production-outputs)
+    (shared/copy-non-zip-contents! toolkit-outputs outputs)
     (fs/copy (shared/production-zip toolkit-outputs project-name)
-             (fs/path production-outputs
-                      (str project-name "-gerbers-" version ".zip"))
-             {:replace-existing true})
+             (fs/path outputs (str project-name "-gerbers-" version ".zip")))
     (fs/delete-tree toolkit-outputs)
     (println (str "Version: " version))
-    (println (str "Schematic outputs: " schematics-outputs))
-    (println (str "Model outputs: " models-outputs))
-    (println (str "Production outputs: " production-outputs))))
+    (println (str "Outputs: " outputs))))

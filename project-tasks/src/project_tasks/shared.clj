@@ -105,7 +105,7 @@
       (fs/create-dirs target)
       (do
         (fs/create-dirs (fs/parent target))
-        (fs/copy source target {:replace-existing true})))))
+        (fs/copy source target)))))
 
 (defn production-zip [production-dir project-name]
   (let [preferred (fs/path production-dir (str project-name ".zip"))]
