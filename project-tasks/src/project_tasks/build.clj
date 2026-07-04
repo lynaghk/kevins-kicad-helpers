@@ -42,16 +42,21 @@
      ["sch" "export" "pdf"
       "-o" (str (fs/path schematics-outputs (str project-name "-sch.pdf")))
       (str schematic)])
+    ;; Autoscale (--scale 0) centers the board on the page; boards drawn off the
+    ;; page origin (e.g. to line up DXF imports) would otherwise plot outside
+    ;; the page box and get cropped.
     (shared/kicad-cli!
      project-dir
      ["pcb" "export" "pdf"
       "-o" (str (fs/path schematics-outputs (str project-name "-pcb-front.pdf")))
+      "--scale" "0"
       "-l" "F.Cu,F.Mask,F.Silkscreen,Edge.Cuts,"
       (str pcb)])
     (shared/kicad-cli!
      project-dir
      ["pcb" "export" "pdf"
       "-o" (str (fs/path schematics-outputs (str project-name "-pcb-back.pdf")))
+      "--scale" "0"
       "--erd"
       "--ev"
       "--mirror"
