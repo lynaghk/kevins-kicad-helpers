@@ -1,8 +1,27 @@
 (ns project-tasks.build
   (:refer-clojure :exclude [run!])
   (:require [babashka.fs :as fs]
+            [clojure.data.csv :as csv]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
             [project-tasks.check :as check]
             [project-tasks.shared :as shared]))
+
+(defn- read-csv [path]
+  (csv/read-csv (str/replace-first (slurp (str path)) "\uFEFF" "")))
+
+(defn filter-positions-to-bom!
+  "Drop rows from positions.csv for parts the BOM does not list, e.g. footprints
+  that only have the exclude-from-BOM fabrication attribute set (mounting holes)."
+  [toolkit-outputs]
+  (let [in-bom (->> (read-csv (fs/path toolkit-outputs "bom.csv"))
+                    rest
+                    (into #{} (mapcat #(str/split (first %) #",\s*"))))
+        positions (fs/path toolkit-outputs "positions.csv")
+        [header & rows] (read-csv positions)]
+    (with-open [writer (io/writer (fs/file positions))]
+      (.write writer "\uFEFF")
+      (csv/write-csv writer (cons header (filter (comp in-bom first) rows))))))
 
 (defn run! [repo-dir {:keys [project-dir project-name schematic pcb] :as project} force?]
   (when-not force?
@@ -58,6 +77,7 @@
       "--excludeDNP"
       "--nonInteractive"
       "--noBackup"])
+    (filter-positions-to-bom! toolkit-outputs)
     (shared/copy-non-zip-contents! toolkit-outputs production-outputs)
     (fs/copy (fs/path toolkit-outputs "bom.csv")
              (fs/path production-outputs (str project-name "-BOM.csv"))
