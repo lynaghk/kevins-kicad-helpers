@@ -97,6 +97,15 @@ def parse_args() -> argparse.Namespace:
         help="Override the location of KiCad's standard symbol libraries (dir of *.kicad_sym).",
     )
     parser.add_argument(
+        "--no-passive-style",
+        action="store_true",
+        help=(
+            "Keep easyeda2kicad's generated symbols for resistors/capacitors instead of "
+            "restyling them to match the CDFER JLCPCB-Kicad-Library (hidden pin numbers, "
+            "value + voltage rating shown)."
+        ),
+    )
+    parser.add_argument(
         "--auto-single",
         action="store_true",
         help="When exactly one standard footprint matches, substitute it without opening the chooser.",
@@ -614,6 +623,219 @@ def add_missing_descriptions(symbol_lib: Path, parts: list[str], fetch=_fetch_jl
             print(f"[descriptions] {part}: not found in the JLCPCB catalog; imported without a description.")
 
 
+_RESISTANCE_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)([kKMmuµ]?)Ω")
+_CAPACITANCE_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)([pnuµm]?)F(?![A-Za-z])")
+_VOLTAGE_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(k?V)(?![A-Za-z])")
+_POLARIZED_RE = re.compile(r"tantalum|electrolytic|polymer|aluminum", re.IGNORECASE)
+
+
+def _passive_value(kind: str, description: str) -> str | None:
+    """The primary rating in a JLCPCB/EasyEDA part description: resistance for
+    R, capacitance for C. EasyEDA spells kilo-ohms with an uppercase K; the
+    CDFER library whose style we mirror writes kΩ."""
+    if kind == "R":
+        m = _RESISTANCE_RE.search(description)
+        return f"{m.group(1)}{m.group(2).replace('K', 'k')}Ω" if m else None
+    m = _CAPACITANCE_RE.search(description)
+    return f"{m.group(1)}{m.group(2)}F" if m else None
+
+
+def _rated_voltage(description: str) -> str | None:
+    m = _VOLTAGE_RE.search(description)
+    return m.group(1) + m.group(2) if m else None
+
+
+def _symbol_pin_numbers(block: str) -> list[str]:
+    """Every pin number in a symbol block, across all sub-unit symbols."""
+    _ensure_chooser_path()
+    from kicad_mod_render import parse_sexpr
+
+    numbers: list[str] = []
+
+    def walk(node) -> None:
+        if not isinstance(node, list) or not node:
+            return
+        if node[0] == "pin":
+            for child in node:
+                if isinstance(child, list) and len(child) >= 2 and child[0] == "number":
+                    numbers.append(str(child[1]))
+        else:
+            for child in node:
+                walk(child)
+
+    walk(parse_sexpr(block))
+    return numbers
+
+
+def _q(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _styled_property(
+    indent: str,
+    key: str,
+    value: str,
+    *,
+    at: str = "0 0 0",
+    font: str = "1.27 1.27",
+    justify_left: bool = False,
+    lock: bool = False,
+    hide: bool = True,
+) -> str:
+    effects = f"(font (size {font}) )"
+    if justify_left:
+        effects += " (justify left)"
+    if hide:
+        effects += " hide"
+    lock_line = f"\n{indent}  (do_not_autoplace)" if lock else ""
+    return (
+        f"{indent}(property {_q(key)} {_q(value)}\n"
+        f"{indent}  (at {at}){lock_line}\n"
+        f"{indent}  (effects {effects})\n"
+        f"{indent})"
+    )
+
+
+def _styled_pin(indent: str, y: float, angle: int, length: float, number: str) -> str:
+    # The name must be "" — under a current-format library header KiCad renders
+    # the legacy "~" empty-name sentinel as a literal tilde on the pin.
+    return (
+        f"{indent}(pin passive line\n"
+        f"{indent}  (at 0 {y} {angle})\n"
+        f"{indent}  (length {length})\n"
+        f'{indent}  (name "" (effects (font (size 1.27 1.27))))\n'
+        f'{indent}  (number "{number}" (effects (font (size 1.27 1.27))))\n'
+        f"{indent})"
+    )
+
+
+def _styled_passive_block(original: str, name: str, kind: str, value: str, voltage: str | None) -> str:
+    """A replacement top-level symbol block styled after the CDFER
+    JLCPCB-Kicad-Library passives: vertical body sized like theirs, pin numbers
+    hidden, the parsed value as the visible Value (small font), and on
+    capacitors the rated voltage shown below it. All other properties are
+    carried over hidden; the drawing is emitted in the same KiCad-6-era dialect
+    easyeda2kicad itself writes into the staged library."""
+    _ensure_chooser_path()
+    from kicad_mod_render import parse_sexpr
+
+    indent = original[: len(original) - len(original.lstrip())]
+    p1, p2, p3 = indent + "  ", indent + "    ", indent + "      "
+    node = parse_sexpr(original)
+    properties = [
+        (str(child[1]), str(child[2]))
+        for child in node
+        if isinstance(child, list) and len(child) >= 3 and child[0] == "property"
+    ]
+
+    def flag(key: str) -> str:
+        m = re.search(r"\(%s\s+(\w+)\)" % key, original)
+        return m.group(1) if m else "yes"
+
+    lines = [
+        f"{indent}(symbol {_q(name)}",
+        f"{p1}(pin_numbers hide)",
+        f"{p1}(pin_names (offset 0))",
+        f"{p1}(in_bom {flag('in_bom')})",
+        f"{p1}(on_board {flag('on_board')})",
+    ]
+    for key, prop_value in properties:
+        if key == "Voltage Rated":
+            continue  # re-emitted right after Value, keeping re-runs stable
+        if key == "Reference":
+            if kind == "R":
+                lines.append(
+                    _styled_property(p1, key, prop_value, at="1.778 0 0", justify_left=True, hide=False)
+                )
+            else:
+                lines.append(
+                    _styled_property(p1, key, prop_value, at="2.032 1.668 0", justify_left=True, hide=False)
+                )
+        elif key == "Value":
+            if kind == "R":
+                lines.append(
+                    _styled_property(p1, key, value, at="0 0 90", font="0.8 0.8", lock=True, hide=False)
+                )
+            else:
+                lines.append(
+                    _styled_property(
+                        p1, key, value, at="2.032 -0.3782 0", font="0.8 0.8", justify_left=True, hide=False
+                    )
+                )
+            if kind == "C" and voltage:
+                lines.append(
+                    _styled_property(
+                        p1,
+                        "Voltage Rated",
+                        voltage,
+                        at="2.032 -2.0462 0",
+                        font="0.8 0.8",
+                        justify_left=True,
+                        hide=False,
+                    )
+                )
+        else:
+            lines.append(_styled_property(p1, key, prop_value))
+
+    lines.append(f"{p1}(symbol {_q(name + '_0_1')}")
+    if kind == "R":
+        lines.append(
+            f"{p2}(rectangle\n"
+            f"{p3}(start -1.016 2.54)\n"
+            f"{p3}(end 1.016 -2.54)\n"
+            f"{p3}(stroke (width 0.254) (type default))\n"
+            f"{p3}(fill (type none))\n"
+            f"{p2})"
+        )
+        pin_length = 1.27
+    else:
+        for plate_y in (0.635, -0.635):
+            lines.append(
+                f"{p2}(polyline\n"
+                f"{p3}(pts (xy -1.27 {plate_y}) (xy 1.27 {plate_y}))\n"
+                f"{p3}(stroke (width 0.254) (type default))\n"
+                f"{p3}(fill (type none))\n"
+                f"{p2})"
+            )
+        pin_length = 3.175
+    lines.append(_styled_pin(p2, 3.81, 270, pin_length, "1"))
+    lines.append(_styled_pin(p2, -3.81, 90, pin_length, "2"))
+    lines.append(f"{p1})")
+    lines.append(f"{indent})")
+    return "\n".join(lines)
+
+
+def restyle_passive_symbols(symbol_lib: Path, parts: list[str]) -> None:
+    """Restyle just-imported two-pin resistors and capacitors to match the CDFER
+    JLCPCB-Kicad-Library: easyeda2kicad's generated passives show pin numbers
+    and use the MPN as the Value, which reads poorly next to that library's
+    hand-curated symbols. Anything that is not a simple two-pin R/C (networks,
+    polarized capacitors) or whose description yields no value is left as-is."""
+    if not symbol_lib.exists():
+        return
+    text = symbol_lib.read_text()
+    for part, info in _symbols_by_lcsc(symbol_lib).items():
+        if part not in parts:
+            continue
+        kind = info.props.get("Reference", "")
+        if kind not in ("R", "C"):
+            continue
+        description = info.props.get("Description") or info.props.get("ki_description") or ""
+        if kind == "C" and _POLARIZED_RE.search(description):
+            continue
+        value = _passive_value(kind, description)
+        if not value:
+            continue
+        block = extract_symbol_block(text, info.name)
+        if block is None or sorted(_symbol_pin_numbers(block)) != ["1", "2"]:
+            continue
+        voltage = _rated_voltage(description) if kind == "C" else None
+        text = text.replace(block, _styled_passive_block(block, info.name, kind, value, voltage), 1)
+        shown = f"{value}, {voltage}" if voltage else value
+        print(f"[style] {part}: {info.name} restyled to the JLCPCB-library look ({shown}).")
+    symbol_lib.write_text(text)
+
+
 def report_standard_symbols(symbol_lib: Path, parts: list[str], args) -> None:
     """Tell the user when KiCad's standard library already has a part's symbol —
     the import may be unnecessary. Report-only, printed before the choosers so
@@ -854,6 +1076,8 @@ def main() -> None:
 
         if not args.no_standard_symbols:
             report_standard_symbols(staged_sym, parts, args)
+        if not args.no_passive_style:
+            restyle_passive_symbols(staged_sym, parts)
 
         committed = confirm_and_commit_parts(
             project_root, staging_root, relative_lib_dir, lib_name, parts, args

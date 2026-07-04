@@ -406,6 +406,206 @@ def test_add_missing_descriptions_survives_fetch_failure():
     assert "ki_description" not in lib.read_text()
 
 
+# --------------------------------------------------------------------------- #
+# passive restyling (feature: match the CDFER JLCPCB-Kicad-Library look for
+# imported resistors/capacitors — hidden pin numbers, parsed value, visible
+# voltage rating on capacitors)
+# --------------------------------------------------------------------------- #
+# Trimmed from real easyeda2kicad v1.0.1 output: horizontal bodies, pin
+# numbers shown, Value = MPN. The resistor network and tantalum cap are the
+# shapes the restyler must leave alone.
+PASSIVE_LIB = """\
+(kicad_symbol_lib
+  (version 20211014)
+  (generator https://github.com/uPesy/easyeda2kicad.py)
+
+  (symbol "0402WGF2001TCE"
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "R" (id 0) (at 0 5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "Value" "0402WGF2001TCE" (id 1) (at 0 -5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "Footprint" "0_test:R0402" (id 2) (at 0 -7.62 0) (effects (font (size 1.27 1.27) ) hide))
+    (property "MPN" "0402WGF2001TCE" (id 5) (at 0 -15.24 0) (effects (font (size 1.27 1.27) ) hide))
+    (property "LCSC" "C4109" (id 6) (at 0 -17.78 0) (effects (font (size 1.27 1.27) ) hide))
+    (property "ki_description" "2KΩ (2001) ±1%" (id 9) (at 0 -22.86 0) (effects (font (size 1.27 1.27) ) hide))
+    (symbol "0402WGF2001TCE_0_1"
+      (rectangle (start -2.54 1.02) (end 2.54 -1.02) (stroke (width 0) (type default)) (fill (type background)))
+      (pin input line (at 5.08 -0.00 180) (length 2.54)
+        (name "2" (effects (font (size 1.27 1.27))))
+        (number "2" (effects (font (size 1.27 1.27)))))
+      (pin input line (at -5.08 -0.00 0) (length 2.54)
+        (name "1" (effects (font (size 1.27 1.27))))
+        (number "1" (effects (font (size 1.27 1.27)))))
+    )
+  )
+
+  (symbol "0402B102K500NT"
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C" (id 0) (at 0 5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "Value" "0402B102K500NT" (id 1) (at 0 -5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "Footprint" "0_test:C0402" (id 2) (at 0 -7.62 0) (effects (font (size 1.27 1.27) ) hide))
+    (property "LCSC" "C1523" (id 6) (at 0 -17.78 0) (effects (font (size 1.27 1.27) ) hide))
+    (property "ki_description" "1nF (102) ±10% 50V" (id 9) (at 0 -22.86 0) (effects (font (size 1.27 1.27) ) hide))
+    (symbol "0402B102K500NT_0_1"
+      (polyline (pts (xy -0.51 2.03) (xy -0.51 -2.03)) (stroke (width 0) (type default)) (fill (type none)))
+      (polyline (pts (xy 0.51 2.03) (xy 0.51 -2.03)) (stroke (width 0) (type default)) (fill (type none)))
+      (pin input line (at -3.81 -0.00 0) (length 2.54)
+        (name "1" (effects (font (size 1.27 1.27))))
+        (number "1" (effects (font (size 1.27 1.27)))))
+      (pin input line (at 3.81 -0.00 180) (length 2.54)
+        (name "2" (effects (font (size 1.27 1.27))))
+        (number "2" (effects (font (size 1.27 1.27)))))
+    )
+  )
+
+  (symbol "TAJB106K016RNJ"
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C" (id 0) (at 0 5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "Value" "TAJB106K016RNJ" (id 1) (at 0 -5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "LCSC" "C7171" (id 6) (at 0 -17.78 0) (effects (font (size 1.27 1.27) ) hide))
+    (property "ki_description" "10uF ±10% 16V Tantalum Capacitors" (id 9) (at 0 -22.86 0) (effects (font (size 1.27 1.27) ) hide))
+    (symbol "TAJB106K016RNJ_0_1"
+      (pin input line (at -3.81 -0.00 0) (length 2.54)
+        (name "1" (effects (font (size 1.27 1.27))))
+        (number "1" (effects (font (size 1.27 1.27)))))
+      (pin input line (at 3.81 -0.00 180) (length 2.54)
+        (name "2" (effects (font (size 1.27 1.27))))
+        (number "2" (effects (font (size 1.27 1.27)))))
+    )
+  )
+
+  (symbol "4D02WGJ0102TCE"
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "R" (id 0) (at 0 5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "Value" "4D02WGJ0102TCE" (id 1) (at 0 -5.08 0) (effects (font (size 1.27 1.27) ) ))
+    (property "LCSC" "C20197" (id 6) (at 0 -17.78 0) (effects (font (size 1.27 1.27) ) hide))
+    (property "ki_description" "1kΩ ±5% Resistor Networks" (id 9) (at 0 -22.86 0) (effects (font (size 1.27 1.27) ) hide))
+    (symbol "4D02WGJ0102TCE_0_1"
+      (pin input line (at -5.08 1.27 0) (length 2.54)
+        (name "1" (effects (font (size 1.27 1.27))))
+        (number "1" (effects (font (size 1.27 1.27)))))
+      (pin input line (at -5.08 -1.27 0) (length 2.54)
+        (name "2" (effects (font (size 1.27 1.27))))
+        (number "2" (effects (font (size 1.27 1.27)))))
+      (pin input line (at 5.08 1.27 180) (length 2.54)
+        (name "8" (effects (font (size 1.27 1.27))))
+        (number "8" (effects (font (size 1.27 1.27)))))
+      (pin input line (at 5.08 -1.27 180) (length 2.54)
+        (name "7" (effects (font (size 1.27 1.27))))
+        (number "7" (effects (font (size 1.27 1.27)))))
+    )
+  )
+)
+"""
+
+
+def test_passive_value_parsing():
+    # EasyEDA spells kilo with an uppercase K; the CDFER library uses kΩ
+    assert imp._passive_value("R", "2KΩ (2001) ±1%") == "2kΩ"
+    # richer JLCPCB catalog descriptions parse too
+    assert imp._passive_value("R", "-55°C~+155°C 2kΩ 50V 62.5mW Thick Film Resistor ±1%") == "2kΩ"
+    assert imp._passive_value("R", "4.7MΩ ±5%") == "4.7MΩ"
+    assert imp._passive_value("R", "100mΩ ±1% 1W") == "100mΩ"
+    assert imp._passive_value("C", "1nF (102) ±10% 50V") == "1nF"
+    assert imp._passive_value("C", "22uF ±20% 25V") == "22uF"
+    assert imp._passive_value("C", "100pF C0G 50V") == "100pF"
+    # no parseable value -> None (the symbol is then left alone)
+    assert imp._passive_value("R", "resistor network") is None
+    assert imp._passive_value("C", "") is None
+    # "Film" must not read as a farad unit
+    assert imp._passive_value("C", "250 Film Capacitor") is None
+
+
+def test_rated_voltage_parsing():
+    assert imp._rated_voltage("1nF (102) ±10% 50V") == "50V"
+    assert imp._rated_voltage("100nF ±10% 6.3V X5R") == "6.3V"
+    assert imp._rated_voltage("1nF 2kV X7R") == "2kV"
+    assert imp._rated_voltage("10pF C0G") is None
+
+
+def _restyled_lib(name: str, parts: list[str]) -> Path:
+    lib = _TMP / f"{name}.kicad_sym"
+    lib.write_text(PASSIVE_LIB)
+    imp.restyle_passive_symbols(lib, parts)
+    return lib
+
+
+def test_restyle_resistor_matches_cdfer_style():
+    lib = _restyled_lib("restyle-r", ["C4109", "C1523"])
+    text = lib.read_text()
+    block = imp.extract_symbol_block(text, "0402WGF2001TCE")
+    assert "(pin_numbers hide)" in block
+    # value parsed from the description, small font, rotated inside the body
+    assert '(property "Value" "2kΩ"' in block
+    assert "(at 0 0 90)" in block and "(do_not_autoplace)" in block
+    assert "(size 0.8 0.8)" in block
+    # CDFER body: narrow vertical rectangle, pins from above/below
+    assert "(start -1.016 2.54)" in block and "(end 1.016 -2.54)" in block
+    assert "(at 0 3.81 270)" in block and "(at 0 -3.81 90)" in block
+    assert block.count("(pin passive line") == 2
+    # the MPN is still on the symbol, and the symbol keeps its name
+    assert '"MPN" "0402WGF2001TCE"' in block.replace("\n", " ").replace("  ", " ") or (
+        '(property "MPN"' in block
+    )
+    root = R.parse_sexpr(text)
+    assert root and root[0] == "kicad_symbol_lib"
+
+
+def test_restyle_capacitor_shows_voltage_rating():
+    lib = _restyled_lib("restyle-c", ["C4109", "C1523"])
+    block = imp.extract_symbol_block(lib.read_text(), "0402B102K500NT")
+    assert "(pin_numbers hide)" in block
+    assert '(property "Value" "1nF"' in block
+    # the voltage rating is a visible property under the value
+    voltage = block[block.index('(property "Voltage Rated" "50V"') :]
+    voltage = voltage[: voltage.index("(property")] if "(property" in voltage[1:] else voltage
+    assert "hide" not in voltage.split("(pin")[0].split("(symbol")[0]
+    assert "(at 2.032 -2.0462 0)" in block
+    # CDFER body: two horizontal plates, long pins from above/below
+    assert "(xy -1.27 0.635)" in block and "(xy -1.27 -0.635)" in block
+    assert "(length 3.175)" in block
+    # unnamed pins must be written as "" — under a modern-format header KiCad
+    # renders the legacy "~" empty-name sentinel as a literal tilde on the leg
+    assert '(name "~"' not in block and '(name ""' in block
+
+
+def test_restyle_skips_unsafe_symbols():
+    lib = _TMP / "restyle-skip.kicad_sym"
+    lib.write_text(PASSIVE_LIB)
+    before_tantalum = imp.extract_symbol_block(PASSIVE_LIB, "TAJB106K016RNJ")
+    before_network = imp.extract_symbol_block(PASSIVE_LIB, "4D02WGJ0102TCE")
+    before_resistor = imp.extract_symbol_block(PASSIVE_LIB, "0402WGF2001TCE")
+    imp.restyle_passive_symbols(lib, ["C4109", "C1523", "C7171", "C20197"])
+    text = lib.read_text()
+    # polarized capacitor: the CDFER flat-plate body would hide its polarity
+    assert imp.extract_symbol_block(text, "TAJB106K016RNJ") == before_tantalum
+    # 4-pin resistor network: not a simple two-pin passive
+    assert imp.extract_symbol_block(text, "4D02WGJ0102TCE") == before_network
+    # parts outside the requested list are never touched
+    lib2 = _TMP / "restyle-subset.kicad_sym"
+    lib2.write_text(PASSIVE_LIB)
+    imp.restyle_passive_symbols(lib2, ["C1523"])
+    assert imp.extract_symbol_block(lib2.read_text(), "0402WGF2001TCE") == before_resistor
+
+
+def test_restyle_is_idempotent_and_commit_tooling_still_works():
+    lib = _restyled_lib("restyle-idem", ["C4109", "C1523"])
+    once = lib.read_text()
+    imp.restyle_passive_symbols(lib, ["C4109", "C1523"])
+    assert lib.read_text() == once  # no duplicated "Voltage Rated", stable output
+    # the LCSC-anchored helpers that run at commit time still find the symbols
+    index = imp._symbols_by_lcsc(lib)
+    assert index["C4109"].name == "0402WGF2001TCE"
+    assert index["C1523"].props["Footprint"] == "0_test:C0402"
+    imp._set_symbol_property(lib, "C1523", "FT Rotation Offset", "90")
+    text = lib.read_text()
+    assert '(property "FT Rotation Offset" "90"' in text
+    assert R.parse_sexpr(text)[0] == "kicad_symbol_lib"
+
+
 def test_remove_generated_footprint_removes_models_keeps_others():
     proj = _TMP / "rmproj"
     (proj / "lib.pretty").mkdir(parents=True, exist_ok=True)

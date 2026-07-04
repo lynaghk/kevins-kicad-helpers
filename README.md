@@ -47,6 +47,14 @@ scripted or agent-driven analysis), `--import-duplicates`,
 `--no-standard-footprints`, `--no-standard-symbols`, `--kicad-footprints-dir`,
 `--kicad-symbols-dir`, `--kicad-config-dir`, `--overwrite`.
 
+Imported two-pin resistors and capacitors are restyled to match the look of the
+JLCPCB-Kicad-Library above: pin numbers hidden, the value parsed from the part
+description (`2kΩ`, `1nF`) shown as the schematic Value, and capacitors showing
+their rated voltage below it.
+Resistor networks, polarized capacitors, and parts whose description doesn't
+parse keep their generated symbols; `--no-passive-style` turns the restyling off
+entirely.
+
 The code lives in `easyeda-import/` (the `bin/` entry is a symlink); its offline
 tests run with `uv run easyeda-import/test_easyeda_import.py`.
 
