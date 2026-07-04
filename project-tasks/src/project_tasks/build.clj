@@ -79,12 +79,6 @@
       "--noBackup"])
     (filter-positions-to-bom! toolkit-outputs)
     (shared/copy-non-zip-contents! toolkit-outputs production-outputs)
-    (fs/copy (fs/path toolkit-outputs "bom.csv")
-             (fs/path production-outputs (str project-name "-BOM.csv"))
-             {:replace-existing true})
-    (fs/copy (fs/path toolkit-outputs "positions.csv")
-             (fs/path production-outputs (str project-name "-CPL.csv"))
-             {:replace-existing true})
     (fs/copy (shared/production-zip toolkit-outputs project-name)
              (fs/path production-outputs
                       (str project-name "-gerbers-" version ".zip"))
