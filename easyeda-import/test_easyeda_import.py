@@ -659,6 +659,98 @@ def test_lower_hidden_properties_clears_origin_after_restyle_and_inserts():
         assert _prop_at(block, key) == f"(at 0 {y:g} 0)"
 
 
+# Trimmed from a real KiCad 10 re-save of an imported library: `(hide yes)`
+# sits directly on the property node, not inside effects.
+MODERN_LIB = """\
+(kicad_symbol_lib
+\t(version 20251024)
+\t(generator "kicad_symbol_editor")
+\t(symbol "CC0603CG100V102JN"
+\t\t(property "Reference" "C"
+\t\t\t(at 2.032 1.668 0)
+\t\t\t(show_name no)
+\t\t\t(effects
+\t\t\t\t(font
+\t\t\t\t\t(size 1.27 1.27)
+\t\t\t\t)
+\t\t\t\t(justify left)
+\t\t\t)
+\t\t)
+\t\t(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+\t\t\t(at 0 0 0)
+\t\t\t(show_name no)
+\t\t\t(hide yes)
+\t\t\t(effects
+\t\t\t\t(font
+\t\t\t\t\t(size 1.27 1.27)
+\t\t\t\t)
+\t\t\t)
+\t\t)
+\t\t(property "LCSC" "C53084479"
+\t\t\t(at 0 0 0)
+\t\t\t(show_name no)
+\t\t\t(hide yes)
+\t\t\t(effects
+\t\t\t\t(font
+\t\t\t\t\t(size 1.27 1.27)
+\t\t\t\t)
+\t\t\t)
+\t\t)
+\t\t(symbol "CC0603CG100V102JN_0_1"
+\t\t\t(pin passive line
+\t\t\t\t(at 0 3.81 270)
+\t\t\t\t(length 3.175)
+\t\t\t\t(name ""
+\t\t\t\t\t(effects
+\t\t\t\t\t\t(font
+\t\t\t\t\t\t\t(size 1.27 1.27)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t\t(number "1"
+\t\t\t\t\t(effects
+\t\t\t\t\t\t(font
+\t\t\t\t\t\t\t(size 1.27 1.27)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t)
+\t\t\t(pin passive line
+\t\t\t\t(at 0 -3.81 90)
+\t\t\t\t(length 3.175)
+\t\t\t\t(name ""
+\t\t\t\t\t(effects
+\t\t\t\t\t\t(font
+\t\t\t\t\t\t\t(size 1.27 1.27)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t\t(number "2"
+\t\t\t\t\t(effects
+\t\t\t\t\t\t(font
+\t\t\t\t\t\t\t(size 1.27 1.27)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t)
+\t\t)
+\t)
+)
+"""
+
+
+def test_lower_hidden_properties_handles_modern_hide_dialect():
+    # KiCad 10 re-saves put (hide yes) directly on the property, not in effects
+    lib = _TMP / "lower-modern.kicad_sym"
+    lib.write_text(MODERN_LIB)
+    imp.lower_hidden_properties(lib, ["C53084479"])
+    block = imp.extract_symbol_block(lib.read_text(), "CC0603CG100V102JN")
+    assert _prop_at(block, "Reference") == "(at 2.032 1.668 0)"  # visible, stays put
+    assert _prop_at(block, "Footprint") == "(at 0 -6.35 0)"  # below the pin at -3.81
+    assert _prop_at(block, "LCSC") == "(at 0 -8.89 0)"
+    assert R.parse_sexpr(lib.read_text())[0] == "kicad_symbol_lib"
+
+
 def test_lower_hidden_properties_is_idempotent():
     lib = _TMP / "lower-idem.kicad_sym"
     lib.write_text(PASSIVE_LIB)

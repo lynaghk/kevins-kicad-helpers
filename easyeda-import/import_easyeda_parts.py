@@ -838,16 +838,21 @@ def restyle_passive_symbols(symbol_lib: Path, parts: list[str]) -> None:
 
 
 def _prop_is_hidden(prop_node: list) -> bool:
-    """Whether a parsed `(property ...)` node is a hidden field, in either the
-    KiCad-6 dialect (a bare `hide` inside effects) or the modern `(hide yes)`."""
-    for child in prop_node:
-        if isinstance(child, list) and child and child[0] == "effects":
-            for item in child:
-                if item == "hide":
-                    return True
-                if isinstance(item, list) and item and item[0] == "hide":
-                    return len(item) < 2 or str(item[1]).lower() != "no"
-    return False
+    """Whether a parsed `(property ...)` node is a hidden field, in any of the
+    dialects in circulation: a bare `hide` (or `(hide yes)`) inside effects as
+    easyeda2kicad writes it, or `(hide yes)` directly on the property node as
+    KiCad 9/10 re-saves do."""
+
+    def hides(node: list) -> bool:
+        for item in node:
+            if item == "hide":
+                return True
+            if isinstance(item, list) and item and item[0] == "hide":
+                return len(item) < 2 or str(item[1]).lower() != "no"
+        return False
+
+    effects = next((c for c in prop_node if isinstance(c, list) and c and c[0] == "effects"), None)
+    return hides(prop_node) or (effects is not None and hides(effects))
 
 
 def _symbol_bottom(symbol_node: list) -> float:
