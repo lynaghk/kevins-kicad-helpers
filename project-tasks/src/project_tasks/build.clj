@@ -74,6 +74,10 @@
       "--nonInteractive"
       "--noBackup"])
     (filter-positions-to-bom! toolkit-outputs)
+    ;; The toolkit's --noBackup flag is inverted (bennymeg/Fabrication-Toolkit
+    ;; thread.py backs up when BACKUP_OPT is false), so remove the backups
+    ;; folder no matter which way the flag ends up behaving.
+    (fs/delete-tree (fs/path toolkit-outputs "backups"))
     (shared/copy-non-zip-contents! toolkit-outputs outputs)
     (fs/copy (shared/production-zip toolkit-outputs project-name)
              (fs/path outputs (str project-name "-gerbers-" version ".zip")))
