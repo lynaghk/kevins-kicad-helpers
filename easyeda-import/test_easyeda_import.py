@@ -606,6 +606,69 @@ def test_restyle_is_idempotent_and_commit_tooling_still_works():
     assert R.parse_sexpr(text)[0] == "kicad_symbol_lib"
 
 
+# --------------------------------------------------------------------------- #
+# hidden-field lowering (feature: stack hidden properties below the symbol so
+# they don't pile onto the drawing when KiCad shows fields in the schematic)
+# --------------------------------------------------------------------------- #
+
+
+def _prop_at(block: str, key: str) -> str:
+    """The "(at ...)" clause of one property inside a symbol block."""
+    prop = block[block.index(f'(property "{key}"') :]
+    return prop[prop.index("(at ") : prop.index(")", prop.index("(at ")) + 1]
+
+
+def test_lower_hidden_properties_stacks_fields_below_symbol():
+    lib = _TMP / "lower.kicad_sym"
+    lib.write_text(PASSIVE_LIB)
+    imp.lower_hidden_properties(lib, ["C4109"])
+    text = lib.read_text()
+    block = imp.extract_symbol_block(text, "0402WGF2001TCE")
+    # visible fields keep their positions
+    assert _prop_at(block, "Reference") == "(at 0 5.08 0)"
+    assert _prop_at(block, "Value") == "(at 0 -5.08 0)"
+    # hidden fields stack on the grid below the lowest visible element (the
+    # Value at y=-5.08), in file order, one 2.54 step apart
+    for key, y in (("Footprint", -7.62), ("MPN", -10.16), ("LCSC", -12.7), ("ki_description", -15.24)):
+        assert _prop_at(block, key) == f"(at 0 {y:g} 0)"
+    # parts outside the requested list are never touched
+    assert imp.extract_symbol_block(text, "0402B102K500NT") == imp.extract_symbol_block(
+        PASSIVE_LIB, "0402B102K500NT"
+    )
+    assert R.parse_sexpr(text)[0] == "kicad_symbol_lib"
+
+
+def test_lower_hidden_properties_clears_origin_after_restyle_and_inserts():
+    # the restyler and _set_symbol_property both drop hidden fields at the
+    # origin — the lowering pass runs after them and must clean all of it up
+    lib = _restyled_lib("lower-restyle", ["C4109"])
+    imp._set_symbol_property(lib, "C4109", "FT Rotation Offset", "270")
+    imp.lower_hidden_properties(lib, ["C4109"])
+    block = imp.extract_symbol_block(lib.read_text(), "0402WGF2001TCE")
+    assert "(at 0 0 0)" not in block  # nothing left piled on the body
+    assert _prop_at(block, "Value") == "(at 0 0 90)"  # visible, stays put
+    # below the pins (lowest point y=-3.81), stacked in file order
+    # (_set_symbol_property anchors its insert right after the LCSC property)
+    for key, y in (
+        ("Footprint", -6.35),
+        ("MPN", -8.89),
+        ("LCSC", -11.43),
+        ("FT Rotation Offset", -13.97),
+        ("ki_description", -16.51),
+    ):
+        assert _prop_at(block, key) == f"(at 0 {y:g} 0)"
+
+
+def test_lower_hidden_properties_is_idempotent():
+    lib = _TMP / "lower-idem.kicad_sym"
+    lib.write_text(PASSIVE_LIB)
+    imp.lower_hidden_properties(lib, ["C4109", "C1523"])
+    once = lib.read_text()
+    imp.lower_hidden_properties(lib, ["C4109", "C1523"])
+    assert lib.read_text() == once
+    assert R.parse_sexpr(once)[0] == "kicad_symbol_lib"
+
+
 def test_remove_generated_footprint_removes_models_keeps_others():
     proj = _TMP / "rmproj"
     (proj / "lib.pretty").mkdir(parents=True, exist_ok=True)

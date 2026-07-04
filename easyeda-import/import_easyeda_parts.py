@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import shutil
@@ -836,6 +837,123 @@ def restyle_passive_symbols(symbol_lib: Path, parts: list[str]) -> None:
     symbol_lib.write_text(text)
 
 
+def _prop_is_hidden(prop_node: list) -> bool:
+    """Whether a parsed `(property ...)` node is a hidden field, in either the
+    KiCad-6 dialect (a bare `hide` inside effects) or the modern `(hide yes)`."""
+    for child in prop_node:
+        if isinstance(child, list) and child and child[0] == "effects":
+            for item in child:
+                if item == "hide":
+                    return True
+                if isinstance(item, list) and item and item[0] == "hide":
+                    return len(item) < 2 or str(item[1]).lower() != "no"
+    return False
+
+
+def _symbol_bottom(symbol_node: list) -> float:
+    """The lowest Y touched by a symbol's drawing, pins, and visible fields
+    (hidden fields are excluded — they are what gets restacked below this)."""
+    ys = [0.0]
+
+    def note(token) -> None:
+        try:
+            ys.append(float(token))
+        except (TypeError, ValueError):
+            pass
+
+    def walk(node: list) -> None:
+        for child in node:
+            if not (isinstance(child, list) and child):
+                continue
+            if child[0] == "property":
+                if not _prop_is_hidden(child):
+                    at = next((c for c in child if isinstance(c, list) and c and c[0] == "at"), None)
+                    if at is not None and len(at) >= 3:
+                        note(at[2])
+            elif child[0] in ("at", "xy", "start", "mid", "end", "center") and len(child) >= 3:
+                note(child[2])
+            else:
+                walk(child)
+
+    walk(symbol_node)
+    return min(ys)
+
+
+def _reposition_property(block: str, key: str, at: str) -> str:
+    """Rewrite the `(at ...)` clause of one named property inside a symbol
+    block. Quote-aware, so parens inside property values don't derail it."""
+    m = re.search(r'\(property\s+"' + re.escape(key) + '"', block)
+    if not m:
+        return block
+    depth = 0
+    in_string = escaped = False
+    child_start = None
+    for i in range(m.start(), len(block)):
+        ch = block[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "(":
+            depth += 1
+            if depth == 2:
+                child_start = i
+        elif ch == ")":
+            depth -= 1
+            if depth == 1 and child_start is not None:
+                if re.match(r"\(at\s", block[child_start:i]):
+                    return block[:child_start] + f"(at {at})" + block[i + 1 :]
+                child_start = None
+            elif depth == 0:
+                return block
+    return block
+
+
+_FIELD_GRID = 1.27
+_FIELD_SPACING = 2.54
+
+
+def lower_hidden_properties(symbol_lib: Path, parts: list[str]) -> None:
+    """Restack each imported symbol's hidden fields on the grid just below the
+    symbol. easyeda2kicad scatters them far under the body, and our own steps
+    (the passive restyler, _set_symbol_property) drop them at the origin — from
+    where they pile onto the drawing whenever KiCad shows fields in the
+    schematic (Edit > Symbol Fields, unhiding LCSC/Description, ...)."""
+    if not symbol_lib.exists():
+        return
+    _ensure_chooser_path()
+    from kicad_mod_render import parse_sexpr
+
+    text = symbol_lib.read_text()
+    for part, info in _symbols_by_lcsc(symbol_lib).items():
+        if part not in parts:
+            continue
+        block = extract_symbol_block(text, info.name)
+        if block is None:
+            continue
+        node = parse_sexpr(block)
+        hidden = [
+            str(child[1])
+            for child in node
+            if isinstance(child, list) and len(child) >= 2 and child[0] == "property" and _prop_is_hidden(child)
+        ]
+        if not hidden:
+            continue
+        base = math.floor(round(_symbol_bottom(node) / _FIELD_GRID, 6)) * _FIELD_GRID
+        new_block = block
+        for i, key in enumerate(hidden):
+            y = round(base - _FIELD_SPACING * (i + 1), 4)
+            new_block = _reposition_property(new_block, key, f"0 {y:g} 0")
+        if new_block != block:
+            text = text.replace(block, new_block, 1)
+    symbol_lib.write_text(text)
+
+
 def report_standard_symbols(symbol_lib: Path, parts: list[str], args) -> None:
     """Tell the user when KiCad's standard library already has a part's symbol —
     the import may be unnecessary. Report-only, printed before the choosers so
@@ -1017,6 +1135,9 @@ def confirm_and_commit_parts(
             staged_sym.write_text(text.replace(f'"{fp_ref}"', f'"{chosen_ref}"'))
             if rotation:
                 _set_symbol_property(staged_sym, part, "FT Rotation Offset", str(rotation))
+        # last property-touching step before commit: everything above may have
+        # left hidden fields at the origin, on top of the symbol drawing
+        lower_hidden_properties(staged_sym, [part])
         commit_part(
             project_root,
             staging_root,
