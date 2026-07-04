@@ -1,8 +1,8 @@
-(ns kicad-parser.core-test
+(ns kicad-analyzer.core-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [datascript.core :as d]
-   [kicad-parser.core :as kicad]))
+   [kicad-analyzer.core :as kicad]))
 
 (def sample-netlist
   "(export
