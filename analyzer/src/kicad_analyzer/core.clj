@@ -173,9 +173,9 @@
         sheetpath (sheetpath node)]
     (cond-> {:instance/ref (child-value 'ref node)
              :instance/value (child-value 'value node)
-             :instance/footprint (child-value 'footprint node)
              :instance/attributes (attributes node)
              :instance/pins (get pins-by-ref (child-value 'ref node) [])}
+      (child-value 'footprint node) (assoc :instance/footprint (child-value 'footprint node))
       (child-value 'description node) (assoc :instance/description (child-value 'description node))
       source (assoc :instance/symbol [:symbol/id (symbol-id source)])
       sheetpath (assoc :instance/sheetpath sheetpath))))

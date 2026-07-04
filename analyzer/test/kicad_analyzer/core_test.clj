@@ -102,6 +102,41 @@
                                :node/pin-number "2"}]}]}
          (kicad/parse-netlist sample-netlist))))
 
+(def footprintless-netlist
+  "A schematic mid-design can contain parts with no footprint assigned yet;
+   kicad-cli then emits the comp without a footprint value."
+  "(export
+     (version \"E\")
+     (components
+       (comp
+         (ref \"J1\")
+         (value \"Conn_01x02_Socket\")
+         (footprint)
+         (libsource
+           (lib \"Connector\")
+           (part \"Conn_01x02_Socket\"))
+         (sheetpath (names \"/\") (tstamps \"/\"))))
+     (nets
+       (net
+         (code \"1\")
+         (name \"GND\")
+         (node
+           (ref \"J1\")
+           (pin \"1\")
+           (pintype \"passive\")))))")
+
+(deftest footprintless-component-test
+  (testing "a part without a footprint parses without a nil footprint entry"
+    (let [[instance] (:instances (kicad/parse-netlist footprintless-netlist))]
+      (is (not (contains? instance :instance/footprint)))))
+
+  (testing "a part without a footprint loads into the db"
+    (let [db (kicad/netlist->db footprintless-netlist)]
+      (is (= #{["J1"]}
+             (d/q '[:find ?ref
+                    :where [_ :instance/ref ?ref]]
+                  db))))))
+
 (deftest datascript-db-test
   (let [db (kicad/netlist->db sample-netlist)]
     (testing "instances are queryable by reference"
