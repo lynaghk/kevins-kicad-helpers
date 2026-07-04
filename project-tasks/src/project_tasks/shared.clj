@@ -113,7 +113,6 @@
       preferred
       (or (->> (fs/glob production-dir "*.zip")
                (filter fs/regular-file?)
-               (remove #(str/includes? (str/lower-case (str (fs/file-name %))) "backup"))
                sort
                first)
           (fail! "Fabrication Toolkit did not create a production Gerber archive.")))))
