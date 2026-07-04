@@ -412,7 +412,7 @@
                            :total (format "%.2f" (* cnt mA))})))
         table-str (with-out-str (clojure.pprint/print-table [:part :count :mA :total] rows))
         table-width (->> (clojure.string/split table-str  #"\n") second count)
-        total-ma (reduce + (map #(Double/parseDouble (:total %)) rows))]
+        total-ma (reduce + 0.0 (map #(Double/parseDouble (:total %)) rows))]
 
     ;; TODO: make this configurable
     (assert (<= total-ma 300))

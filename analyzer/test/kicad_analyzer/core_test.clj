@@ -1,5 +1,6 @@
 (ns kicad-analyzer.core-test
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [datascript.core :as d]
    [kicad-analyzer.core :as kicad]))
@@ -136,6 +137,13 @@
              (d/q '[:find ?ref
                     :where [_ :instance/ref ?ref]]
                   db))))))
+
+(deftest check-power-test
+  (testing "a schematic with no max_mA attributes reports a zero total"
+    (let [db (kicad/components->db [{:instance/ref "R1"
+                                     :instance/value "10k"}])
+          out (with-out-str (kicad/check-power! db))]
+      (is (str/includes? out "Total: 0.00 mA")))))
 
 (deftest datascript-db-test
   (let [db (kicad/netlist->db sample-netlist)]
