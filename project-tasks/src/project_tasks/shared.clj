@@ -4,11 +4,23 @@
             [clojure.string :as str])
   (:import [java.time LocalDate]))
 
-(defn repo-dir []
-  (str (fs/cwd)))
-
 (defn fail! [message]
   (throw (ex-info message {})))
+
+(defn find-repo-dir
+  "Nearest ancestor of start-dir (inclusive) containing a pcbs/ directory, or nil."
+  [start-dir]
+  (->> (fs/absolutize start-dir)
+       (iterate fs/parent)
+       (take-while some?)
+       (filter #(fs/directory? (fs/path % "pcbs")))
+       first))
+
+(defn repo-dir []
+  (or (some-> (find-repo-dir (fs/cwd)) str)
+      (fail! (str "Could not find a pcbs/ directory in "
+                  (fs/cwd)
+                  " or any parent directory."))))
 
 (defn command-result [dir args]
   @(p/process args

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+exec bb --classpath src:test -e "
+(require '[clojure.test :as t] '[project-tasks.shared-test])
+(let [{:keys [fail error]} (t/run-tests 'project-tasks.shared-test)]
+  (System/exit (if (zero? (+ fail error)) 0 1)))"

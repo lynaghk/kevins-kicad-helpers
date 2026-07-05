@@ -82,12 +82,13 @@ without any machine-specific setup.
 From the root of your KiCad project repo (a git repo), run `bin/kkh-bootstrap`.
 Then:
 
-```
-mkdir -p pcbs/<board>        # each board gets its own dir with .kicad_pro/.kicad_sch/.kicad_pcb
-bb list                      # list discovered boards
-bb check [board]             # omit board to check all
-bb build [board] [--force]   # omit board to build all
-```
+    mkdir -p pcbs/<board>        # each board gets its own dir with .kicad_pro/.kicad_sch/.kicad_pcb
+    kkh list                     # list discovered boards
+    kkh check [board]            # omit board to check all
+    kkh build [board] [--force]  # omit board to build all
+
+The `kkh` commands work from any directory inside the project.
+The consuming repo needs no bb.edn and no Babashka install: `kkh` brings its own (via `bb` on PATH or the version pinned in this repo's mise.toml, fetched through `mise x`).
 
 ## Developing this repo
 

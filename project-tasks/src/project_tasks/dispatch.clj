@@ -7,9 +7,9 @@
 
 (def usage
   (str "Usage:\n"
-       "  bb list\n"
-       "  bb check [board]\n"
-       "  bb build [board] [--force]"))
+       "  kkh list\n"
+       "  kkh check [board]\n"
+       "  kkh build [board] [--force]"))
 
 (defn available-boards [projects]
   (str/join "\n" (map #(str "  " (:board-name %)) projects)))
@@ -88,3 +88,16 @@
       (binding [*out* *err*]
         (println (.getMessage error)))
       1)))
+
+(defn -main [& [command & args]]
+  (cond
+    (nil? command)
+    (do (binding [*out* *err*] (println usage))
+        (System/exit 1))
+
+    (#{"help" "-h" "--help"} command)
+    (do (println usage)
+        (System/exit 0))
+
+    :else
+    (System/exit (run! command args))))

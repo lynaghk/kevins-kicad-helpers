@@ -3,9 +3,10 @@
 # Bootstrap a KiCad project to use kevins-kicad-helpers' project tasks.
 #
 # Run from the root of your project directory. Vendors this repo as a git
-# submodule under vendor/kevins-kicad-helpers, then writes a bb.edn (mounting
-# the project-tasks library) and a mise.toml (babashka + the helpers' bin on
-# PATH). On any blocking error it prints a manual runbook and exits non-zero.
+# submodule under vendor/kevins-kicad-helpers, then writes a mise.toml putting
+# the helpers' bin on PATH. Project tasks run via the vendored `kkh` script
+# (which provides Babashka itself), so the project needs no bb.edn or tool
+# pins. On any blocking error it prints a manual runbook and exits non-zero.
 
 set -euo pipefail
 
@@ -14,24 +15,7 @@ KKH_REPO=$(realpath "$SCRIPT_DIR/..")
 ORIGIN_URL=$(git -C "$KKH_REPO" remote get-url origin 2>/dev/null || true)
 URL_FOR_DOCS="${ORIGIN_URL:-https://github.com/lynaghk/kevins-kicad-helpers}"
 
-read -r -d '' BB_EDN <<'EOF' || true
-{:paths ["vendor/kevins-kicad-helpers/project-tasks/src"]
- :tasks
- {list  {:doc "List KiCad PCB projects."
-         :requires ([project-tasks.dispatch :as dispatch])
-         :task (System/exit (dispatch/run! "list" *command-line-args*))}
-  check {:doc "Check KiCad PCB projects (ERC/DRC + custom checks)."
-         :requires ([project-tasks.dispatch :as dispatch])
-         :task (System/exit (dispatch/run! "check" *command-line-args*))}
-  build {:doc "Build KiCad PCB production outputs."
-         :requires ([project-tasks.dispatch :as dispatch])
-         :task (System/exit (dispatch/run! "build" *command-line-args*))}}}
-EOF
-
 read -r -d '' MISE_TOML <<'EOF' || true
-[tools]
-"github:babashka/babashka" = "1.12.218"
-
 [env]
 _.path = ["{{config_root}}/vendor/kevins-kicad-helpers/bin"]
 EOF
@@ -45,11 +29,9 @@ kkh-bootstrap couldn't finish automatically. To set up the project by hand:
   2. Vendor the helpers:
        git submodule add $URL_FOR_DOCS vendor/kevins-kicad-helpers
        git submodule update --init --recursive
-  3. Create bb.edn with:
-$BB_EDN
-  4. Create mise.toml with:
+  3. Create mise.toml with:
 $MISE_TOML
-  5. Install tools and try it:             touch mise.lock && mise install && bb list
+  4. Trust the config and try it:          mise trust && kkh list
 EOF
 }
 die() { echo "Error: $1" >&2; manual; exit 1; }
@@ -57,36 +39,32 @@ die() { echo "Error: $1" >&2; manual; exit 1; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "current directory is not a git repository."
 [ -n "$ORIGIN_URL" ] || die "the kevins-kicad-helpers checkout at $KKH_REPO has no 'origin' remote."
 [ ! -e vendor/kevins-kicad-helpers ] || die "vendor/kevins-kicad-helpers already exists."
-[ ! -e bb.edn ] || die "bb.edn already exists (project looks already set up)."
 
 git submodule add "$ORIGIN_URL" vendor/kevins-kicad-helpers
 git submodule update --init --recursive
 
-printf '%s\n' "$BB_EDN" > bb.edn
 if [ -e mise.toml ]; then
   cat >&2 <<EOF
-Note: mise.toml already exists; leaving it. Merge in the following so it pins
-      babashka and adds the helpers' bin to PATH:
+Note: mise.toml already exists; leaving it. Merge in the following so the
+      helpers' bin is on PATH:
 
 $MISE_TOML
 EOF
 else
   printf '%s\n' "$MISE_TOML" > mise.toml
-  touch mise.lock            # mise only maintains the lockfile when it already exists
 fi
 
-# Install the pinned tools (trust the freshly written config first). Non-fatal:
-# the project is already vendored/configured, so a missing or offline mise just
-# leaves a note rather than aborting.
+# Trust the freshly written config so the PATH entry takes effect. Non-fatal:
+# the project is already vendored/configured, and kkh also works when invoked
+# by its full vendored path.
 if command -v mise >/dev/null 2>&1; then
   mise trust >/dev/null 2>&1 || true
-  mise install || echo "Note: 'mise install' failed; re-run it once your environment is ready." >&2
 else
-  echo "Note: 'mise' is not on PATH; install it, then run 'mise install'." >&2
+  echo "Note: 'mise' is not on PATH; install it so vendor/kevins-kicad-helpers/bin lands on PATH." >&2
 fi
 
 cat <<'EOF'
 Bootstrapped KiCad project tasks. Next steps:
   mkdir -p pcbs/<board>       # each board's .kicad_pro/.kicad_sch/.kicad_pcb goes here
-  bb list                     # list discovered boards, then: bb check/build <board>
+  kkh list                    # list discovered boards, then: kkh check/build <board>
 EOF

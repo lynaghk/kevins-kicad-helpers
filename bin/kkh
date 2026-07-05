@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# Entry point for the project tasks: kkh list | check | build.
+#
+# Works from anywhere inside a consuming KiCad project (the Clojure side walks
+# up from the working directory to the nearest ancestor with a pcbs/ folder).
+# Consuming repos need no bb.edn and no Babashka of their own: this script
+# finds bb on PATH, or falls back to running it via mise using the version
+# pinned in this repo's mise.toml.
+
+set -euo pipefail
+
+SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+KKH_REPO=$(realpath "$SCRIPT_DIR/..")
+
+# Sibling shims (kicad-cli, fabrication-toolkit, ...) must be resolvable even
+# when the consumer's environment doesn't put this bin/ on PATH.
+export PATH="$SCRIPT_DIR:$PATH"
+
+if command -v bb >/dev/null 2>&1; then
+    BB=(bb)
+elif command -v mise >/dev/null 2>&1; then
+    BB_VERSION=$(sed -n 's/.*babashka\/babashka" = "\([0-9.]*\)".*/\1/p' "$KKH_REPO/mise.toml")
+    BB=(mise x "github:babashka/babashka@${BB_VERSION:-latest}" -- bb)
+else
+    echo "Error: need either 'bb' (Babashka) or 'mise' on PATH to run project tasks." >&2
+    exit 1
+fi
+
+exec "${BB[@]}" --classpath "$KKH_REPO/project-tasks/src" -m project-tasks.dispatch "$@"
