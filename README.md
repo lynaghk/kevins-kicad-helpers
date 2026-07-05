@@ -1,6 +1,7 @@
 # Kevin's KiCad helpers.
 
-Intended use case is to add this repo as a git submodule to your KiCad project repo
+Get `bin/` on your PATH — anywhere, anyhow — and you have everything.
+Vendor this repo per project (e.g. as a git submodule) or clone it once systemwide; the scripts pull their own tools at the versions pinned in this repo's mise.toml, so the only machine requirement is [mise](https://mise.jdx.dev).
 
 - `bin/` has one-off tools you can invoke wherever.
 - `project-tasks/` is a suite of Babashka helpers to check and build KiCad projects.
@@ -77,19 +78,24 @@ without any machine-specific setup.
   any platform. Override the plugin dir with `FABRICATION_TOOLKIT_DIR`; set
   `FABRICATION_TOOLKIT_FLATPAK=1` to run it inside the KiCad Flatpak.
 
-## Bootstrapping a project
+## Project tasks
 
-From the root of your KiCad project repo (a git repo), run `bin/kkh-bootstrap`.
-Then:
+A KiCad project is any directory with a `pcbs/` folder; each board lives in its own subdirectory:
 
     mkdir -p pcbs/<board>        # each board gets its own dir with .kicad_pro/.kicad_sch/.kicad_pcb
     kkh list                     # list discovered boards
     kkh check [board]            # omit board to check all
     kkh build [board] [--force]  # omit board to build all
 
-The `kkh` commands work from any directory inside the project.
-The consuming repo needs no bb.edn and no tool pins of its own: `kkh` runs everything through [mise](https://mise.jdx.dev) at the versions pinned in this repo's mise.toml, so invoking the vendored `kkh` is the whole contract.
-The only thing a consumer machine needs installed is mise (plus KiCad for the boards themselves).
+The `kkh` commands work from any directory inside the project (they walk up to the nearest ancestor with a `pcbs/` folder).
+The project itself needs no configuration — no bb.edn, no tool pins — just `kkh` reachable on PATH, vendored or systemwide.
+If you vendor per project with mise, this is the whole setup:
+
+    git submodule add <this repo's url> vendor/kevins-kicad-helpers
+
+    # mise.toml
+    [env]
+    _.path = ["{{config_root}}/vendor/kevins-kicad-helpers/bin"]
 
 ## Developing this repo
 
