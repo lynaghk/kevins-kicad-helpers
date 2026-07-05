@@ -88,7 +88,8 @@ Then:
     kkh build [board] [--force]  # omit board to build all
 
 The `kkh` commands work from any directory inside the project.
-The consuming repo needs no bb.edn and no Babashka install: `kkh` brings its own (via `bb` on PATH or the version pinned in this repo's mise.toml, fetched through `mise x`).
+The consuming repo needs no bb.edn and no tool pins of its own: `kkh` runs everything through [mise](https://mise.jdx.dev) at the versions pinned in this repo's mise.toml, so invoking the vendored `kkh` is the whole contract.
+The only thing a consumer machine needs installed is mise (plus KiCad for the boards themselves).
 
 ## Developing this repo
 

@@ -4,9 +4,10 @@
 #
 # Run from the root of your project directory. Vendors this repo as a git
 # submodule under vendor/kevins-kicad-helpers, then writes a mise.toml putting
-# the helpers' bin on PATH. Project tasks run via the vendored `kkh` script
-# (which provides Babashka itself), so the project needs no bb.edn or tool
-# pins. On any blocking error it prints a manual runbook and exits non-zero.
+# the helpers' bin on PATH. Project tasks run via the vendored `kkh` script,
+# which pulls every tool at the version pinned in the helpers' own mise.toml,
+# so the project needs no bb.edn or tool pins — just mise. On any blocking
+# error it prints a manual runbook and exits non-zero.
 
 set -euo pipefail
 
@@ -54,13 +55,12 @@ else
   printf '%s\n' "$MISE_TOML" > mise.toml
 fi
 
-# Trust the freshly written config so the PATH entry takes effect. Non-fatal:
-# the project is already vendored/configured, and kkh also works when invoked
-# by its full vendored path.
+# Trust the freshly written config so the PATH entry takes effect. Non-fatal
+# here, but kkh itself requires mise at run time to provide its pinned tools.
 if command -v mise >/dev/null 2>&1; then
   mise trust >/dev/null 2>&1 || true
 else
-  echo "Note: 'mise' is not on PATH; install it so vendor/kevins-kicad-helpers/bin lands on PATH." >&2
+  echo "Note: 'mise' is not on PATH; kkh requires it (https://mise.jdx.dev)." >&2
 fi
 
 cat <<'EOF'

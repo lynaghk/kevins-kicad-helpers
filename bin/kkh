@@ -4,27 +4,29 @@
 #
 # Works from anywhere inside a consuming KiCad project (the Clojure side walks
 # up from the working directory to the nearest ancestor with a pcbs/ folder).
-# Consuming repos need no bb.edn and no Babashka of their own: this script
-# finds bb on PATH, or falls back to running it via mise using the version
-# pinned in this repo's mise.toml.
+# Consuming repos need no bb.edn and no tool pins of their own: every tool
+# runs at the version pinned in this repo's mise.toml, so invoking this script
+# is the whole contract. The only requirement is mise itself.
 
 set -euo pipefail
 
 SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 KKH_REPO=$(realpath "$SCRIPT_DIR/..")
 
+if ! command -v mise >/dev/null 2>&1; then
+    echo "Error: kkh needs 'mise' on PATH (https://mise.jdx.dev) to provide its pinned tools." >&2
+    exit 1
+fi
+
+# Load this repo's pinned toolchain into PATH. mise -C would also change the
+# working directory, and the tasks resolve the project from $PWD, so eval the
+# environment instead of exec-ing through mise.
+mise trust "$KKH_REPO/mise.toml" >/dev/null 2>&1 || true
+mise -C "$KKH_REPO" install --quiet
+eval "$(mise -C "$KKH_REPO" env)"
+
 # Sibling shims (kicad-cli, fabrication-toolkit, ...) must be resolvable even
 # when the consumer's environment doesn't put this bin/ on PATH.
 export PATH="$SCRIPT_DIR:$PATH"
 
-if command -v bb >/dev/null 2>&1; then
-    BB=(bb)
-elif command -v mise >/dev/null 2>&1; then
-    BB_VERSION=$(sed -n 's/.*babashka\/babashka" = "\([0-9.]*\)".*/\1/p' "$KKH_REPO/mise.toml")
-    BB=(mise x "github:babashka/babashka@${BB_VERSION:-latest}" -- bb)
-else
-    echo "Error: need either 'bb' (Babashka) or 'mise' on PATH to run project tasks." >&2
-    exit 1
-fi
-
-exec "${BB[@]}" --classpath "$KKH_REPO/project-tasks/src" -m project-tasks.dispatch "$@"
+exec bb --classpath "$KKH_REPO/project-tasks/src" -m project-tasks.dispatch "$@"
