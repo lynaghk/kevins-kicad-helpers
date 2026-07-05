@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${KICAD_CLI:-}" ]]; then
+  exec "${KICAD_CLI}" "$@"
+fi
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  app=/Applications/KiCad/KiCad.app
+  executable="${app}/Contents/MacOS/kicad-cli"
+
+  if [[ ! -x "${executable}" ]]; then
+    echo "Could not find kicad-cli at ${executable}." >&2
+    exit 1
+  fi
+
+  if [[ -z "${FONTCONFIG_FILE:-}" ]]; then
+    for file in \
+      "${app}/Contents/Resources/fonts/fonts.conf" \
+      "${app}/Contents/Resources/etc/fonts/fonts.conf" \
+      "${app}/Contents/Frameworks/etc/fonts/fonts.conf"; do
+      if [[ -f "${file}" ]]; then
+        export FONTCONFIG_FILE="${file}"
+        export FONTCONFIG_PATH="${file%/*}"
+        break
+      fi
+    done
+
+    if [[ -z "${FONTCONFIG_FILE:-}" ]]; then
+      file="$(find "${app}" -name fonts.conf -type f 2>/dev/null | sort | head -n 1)"
+    fi
+
+    if [[ -z "${file:-}" ]]; then
+      file="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/fontconfig/fonts.conf"
+    fi
+
+    export FONTCONFIG_FILE="${file}"
+    export FONTCONFIG_PATH="${file%/*}"
+  fi
+
+  exec "${executable}" "$@"
+fi
+
+shim="$(realpath "$0")"
+while IFS= read -r executable; do
+  if [[ "$(realpath "${executable}")" != "${shim}" ]]; then
+    exec "${executable}" "$@"
+  fi
+done < <(type -aP kicad-cli)
+
+if command -v flatpak >/dev/null && flatpak info org.kicad.KiCad >/dev/null 2>&1; then
+  exec flatpak run \
+    --filesystem="${PWD}":rw \
+    --command=/app/bin/kicad-cli \
+    org.kicad.KiCad \
+    "$@"
+fi
+
+echo "Could not find kicad-cli." >&2
+echo "Set KICAD_CLI, install KiCad, or install the org.kicad.KiCad Flatpak." >&2
+exit 1

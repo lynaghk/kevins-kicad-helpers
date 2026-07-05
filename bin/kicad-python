@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${KICAD_PYTHON:-}" ]]; then
+  exec "${KICAD_PYTHON}" "$@"
+fi
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  executable=/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
+
+  if [[ ! -x "${executable}" ]]; then
+    echo "Could not find KiCad's framework Python at ${executable}." >&2
+    echo "Set KICAD_PYTHON to a Python that can import KiCad's pcbnew module." >&2
+    exit 1
+  fi
+
+  exec "${executable}" "$@"
+fi
+
+if command -v python3 >/dev/null; then
+  exec python3 "$@"
+fi
+
+if command -v python >/dev/null; then
+  exec python "$@"
+fi
+
+echo "Could not find a KiCad-compatible Python." >&2
+exit 1

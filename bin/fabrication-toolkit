@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+plugin_name=com_github_bennymeg_JLC-Plugin-for-KiCad
+
+# Plugin roots for KiCad's Plugin and Content Manager, per platform.
+plugin_roots=(
+  "${HOME}/Documents/KiCad"                     # macOS
+  "${HOME}/.local/share/kicad"                  # Linux
+  "${HOME}/.var/app/org.kicad.KiCad/data/kicad" # Flatpak
+)
+
+find_toolkit_dir() {
+  local version root candidate
+  version="$("${script_dir}/kicad-cli" version 2>/dev/null | grep -oE '^[0-9]+\.[0-9]+' || true)"
+
+  # Prefer the running KiCad's major.minor, then fall back to the newest
+  # version dir that has the plugin.
+  if [[ -n "${version}" ]]; then
+    for root in "${plugin_roots[@]}"; do
+      candidate="${root}/${version}/3rdparty/plugins/${plugin_name}"
+      if [[ -d "${candidate}" ]]; then
+        echo "${candidate}"
+        return
+      fi
+    done
+  fi
+
+  for root in "${plugin_roots[@]}"; do
+    [[ -d "${root}" ]] || continue
+    while IFS= read -r candidate; do
+      if [[ -d "${root}/${candidate}/3rdparty/plugins/${plugin_name}" ]]; then
+        echo "${root}/${candidate}/3rdparty/plugins/${plugin_name}"
+        return
+      fi
+    done < <(ls -1 "${root}" | sort -rV)
+  done
+}
+
+toolkit_dir="${FABRICATION_TOOLKIT_DIR:-$(find_toolkit_dir)}"
+
+if [[ -z "${toolkit_dir}" ]]; then
+  echo "Could not find the Fabrication Toolkit plugin (${plugin_name})." >&2
+  echo "Searched under:" >&2
+  for root in "${plugin_roots[@]}"; do
+    echo "  ${root}/<version>/3rdparty/plugins/" >&2
+  done
+  echo "Install \"Fabrication Toolkit\" with KiCad's Plugin and Content Manager, or set FABRICATION_TOOLKIT_DIR." >&2
+  exit 1
+fi
+
+cli_file="${toolkit_dir}/plugins/cli.py"
+
+if [[ ! -f "${cli_file}" && -f "${toolkit_dir}/cli.py" ]]; then
+  cli_file="${toolkit_dir}/cli.py"
+fi
+
+if [[ ! -f "${cli_file}" ]]; then
+  echo "Found ${toolkit_dir} but not its CLI entry point." >&2
+  echo "Expected: ${toolkit_dir}/plugins/cli.py" >&2
+  echo "Reinstall \"Fabrication Toolkit\" with KiCad's Plugin and Content Manager, or set FABRICATION_TOOLKIT_DIR." >&2
+  exit 1
+fi
+
+filter_errors() {
+  grep -v 'Debug: Adding duplicate image handler for' >&2 || true
+}
+
+if [[ "${FABRICATION_TOOLKIT_FLATPAK:-0}" == "1" ]]; then
+  if [[ "${cli_file}" == "${toolkit_dir}/cli.py" ]]; then
+    echo "Flatpak execution expects ${toolkit_dir}/plugins/cli.py." >&2
+    exit 1
+  fi
+
+  module_root="$(dirname "$(dirname "${cli_file}")")"
+  exec 2> >(filter_errors)
+  exec flatpak run \
+    --filesystem="${PWD}":rw \
+    --filesystem="${module_root}":ro \
+    --env="PYTHONPATH=${module_root}" \
+    --command=/app/bin/python \
+    org.kicad.KiCad \
+    -m plugins.cli \
+    "$@"
+fi
+
+if [[ "${cli_file}" == "${toolkit_dir}/cli.py" ]]; then
+  module_root="$(mktemp -d "${TMPDIR:-/tmp}/fabrication-toolkit.XXXXXX")"
+  trap 'rm -rf "${module_root}"' EXIT
+  ln -s "${toolkit_dir}" "${module_root}/fabrication_toolkit"
+  module=fabrication_toolkit.cli
+else
+  module_root="$(dirname "$(dirname "${cli_file}")")"
+  module=plugins.cli
+fi
+
+cd "${module_root}"
+export PYTHONPATH="${module_root}${PYTHONPATH:+:${PYTHONPATH}}"
+
+# The plugin builds a wx.App, which needs a display even in CLI mode.
+runner=("${script_dir}/kicad-python")
+if [[ "$(uname -s)" != "Darwin" && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+  if command -v xvfb-run >/dev/null; then
+    runner=(xvfb-run --auto-servernum "${script_dir}/kicad-python")
+  else
+    echo "No display available and xvfb-run not found; install xvfb or set DISPLAY." >&2
+    exit 1
+  fi
+fi
+
+"${runner[@]}" -c '
+import runpy
+import sys
+import wx
+
+module = sys.argv[1]
+sys.argv = [module] + sys.argv[2:]
+app = wx.App(False)
+runpy.run_module(module, run_name="__main__", alter_sys=True)
+' "${module}" "$@" 2> >(filter_errors)

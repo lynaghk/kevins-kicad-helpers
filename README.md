@@ -58,6 +58,25 @@ entirely.
 The code lives in `easyeda-import/` (the `bin/` entry is a symlink); its offline
 tests run with `uv run easyeda-import/test_easyeda_import.py`.
 
+## KiCad tool shims
+
+`bin/` also provides `kicad-cli`, `kicad-python`, and `fabrication-toolkit`
+shims that locate the real tools per platform (macOS app bundle, Linux
+system install, or the org.kicad.KiCad Flatpak), so the project tasks work
+without any machine-specific setup.
+
+- `kicad-cli` — macOS app bundle (with fontconfig setup) → `kicad-cli` on
+  PATH → Flatpak. Override with `KICAD_CLI`.
+- `kicad-python` — a Python that can import KiCad's `pcbnew`/`wx`: the macOS
+  app bundle's framework Python, otherwise the system `python3`.
+  Override with `KICAD_PYTHON`.
+- `fabrication-toolkit` — runs the CLI of the
+  [Fabrication Toolkit](https://github.com/bennymeg/JLC-Plugin-for-KiCad)
+  plugin, which must be installed via KiCad's Plugin and Content Manager.
+  The shim finds it in the PCM plugin dir for the installed KiCad version on
+  any platform. Override the plugin dir with `FABRICATION_TOOLKIT_DIR`; set
+  `FABRICATION_TOOLKIT_FLATPAK=1` to run it inside the KiCad Flatpak.
+
 ## Bootstrapping a project
 
 From the root of your KiCad project repo (a git repo), run `bin/kkh-bootstrap`.
