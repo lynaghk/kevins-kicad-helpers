@@ -6,13 +6,19 @@ if [[ -n "${KICAD_PYTHON:-}" ]]; then
 fi
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  executable=/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
+  app=/Applications/KiCad/KiCad.app
+  executable="${app}/Contents/Frameworks/Python.framework/Versions/Current/bin/python3"
 
   if [[ ! -x "${executable}" ]]; then
     echo "Could not find KiCad's framework Python at ${executable}." >&2
     echo "Set KICAD_PYTHON to a Python that can import KiCad's pcbnew module." >&2
     exit 1
   fi
+
+  # pcbnew loads KiCad's bundled fontconfig, which needs the same config-file
+  # fix as kicad-cli or it warns about a missing default config file.
+  source "$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/fontconfig/env.bash"
+  kkh_export_fontconfig "${app}"
 
   exec "${executable}" "$@"
 fi

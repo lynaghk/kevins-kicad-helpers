@@ -14,29 +14,8 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     exit 1
   fi
 
-  if [[ -z "${FONTCONFIG_FILE:-}" ]]; then
-    for file in \
-      "${app}/Contents/Resources/fonts/fonts.conf" \
-      "${app}/Contents/Resources/etc/fonts/fonts.conf" \
-      "${app}/Contents/Frameworks/etc/fonts/fonts.conf"; do
-      if [[ -f "${file}" ]]; then
-        export FONTCONFIG_FILE="${file}"
-        export FONTCONFIG_PATH="${file%/*}"
-        break
-      fi
-    done
-
-    if [[ -z "${FONTCONFIG_FILE:-}" ]]; then
-      file="$(find "${app}" -name fonts.conf -type f 2>/dev/null | sort | head -n 1)"
-    fi
-
-    if [[ -z "${file:-}" ]]; then
-      file="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/fontconfig/fonts.conf"
-    fi
-
-    export FONTCONFIG_FILE="${file}"
-    export FONTCONFIG_PATH="${file%/*}"
-  fi
+  source "$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/fontconfig/env.bash"
+  kkh_export_fontconfig "${app}"
 
   exec "${executable}" "$@"
 fi
