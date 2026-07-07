@@ -1,6 +1,7 @@
 (ns project-tasks.shared
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
+            [cheshire.core :as json]
             [clojure.string :as str])
   (:import [java.time LocalDate]))
 
@@ -98,6 +99,62 @@
 
 (defn kicad-cli! [dir args]
   (shell! dir (into ["kicad-cli"] args)))
+
+(defn with-text-variable
+  "Call body-fn with the text variable name=value written into the project
+  file, restoring its original contents afterwards. Needed for tools that
+  resolve text variables from the .kicad_pro and have no flag to define them
+  (kicad-cli takes -D instead)."
+  [project-file name value body-fn]
+  (let [file (fs/file project-file)
+        original (slurp file)]
+    (try
+      (spit file (-> (json/parse-string original)
+                     (assoc-in ["text_variables" name] value)
+                     (json/generate-string {:pretty true})))
+      (body-fn)
+      (finally
+        (spit file original)))))
+
+(defn with-board-text-variable
+  "Call body-fn with the board file's cached copy of the text variable
+  name=value updated, restoring the original contents afterwards. KiCad
+  mirrors project text variables into the .kicad_pcb as board-level
+  (property ...) entries on save, and pcbnew resolves text from that cached
+  copy in preference to the project file, so tools that plot through pcbnew
+  (Fabrication Toolkit) see a stale value unless the board copy is updated
+  too. Boards whose file lacks the property fall back to the project file
+  and are left untouched."
+  [pcb name value body-fn]
+  (let [file (fs/file pcb)
+        original (slurp file)
+        pattern (re-pattern (str "(\\(property \""
+                                 (java.util.regex.Pattern/quote name)
+                                 "\" \")[^\"]*(\"\\))"))
+        updated (str/replace original pattern
+                             (str "$1"
+                                  (java.util.regex.Matcher/quoteReplacement value)
+                                  "$2"))]
+    (try
+      (when-not (= original updated)
+        (spit file updated))
+      (body-fn)
+      (finally
+        (when-not (= original updated)
+          (spit file original))))))
+
+(defn ensure-text-variable!
+  "Persistently define the text variable name=value in the project file unless
+  it already defines one. Interactive KiCad has no -D equivalent, so without a
+  committed value it reports ${name} references as unresolved; scripted runs
+  override this placeholder with the real value."
+  [project-file name value]
+  (let [file (fs/file project-file)
+        parsed (json/parse-string (slurp file))]
+    (when-not (contains? (get parsed "text_variables") name)
+      (spit file (-> parsed
+                     (assoc-in ["text_variables" name] value)
+                     (json/generate-string {:pretty true}))))))
 
 (defn run-fabrication-toolkit! [project-dir pcb args]
   (shell! project-dir

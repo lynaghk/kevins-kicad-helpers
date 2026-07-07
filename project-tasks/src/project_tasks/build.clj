@@ -23,7 +23,7 @@
       (.write writer "\uFEFF")
       (csv/write-csv writer (cons header (filter (comp in-bom first) rows))))))
 
-(defn run! [repo-dir {:keys [project-dir project-name schematic pcb] :as project} force?]
+(defn run! [repo-dir {:keys [project-dir project-file project-name schematic pcb] :as project} force?]
   (when-not force?
     (try
       (check/run! repo-dir project)
@@ -32,6 +32,9 @@
                            (.getMessage error)
                            "\nFix the reported issues, or rerun with --force.")))))
   (let [version (shared/build-version repo-dir)
+        ;; Lets boards stamp the build version on the silkscreen by placing a
+        ;; ${KKH_VERSION_DATE} text item.
+        version-var (str "KKH_VERSION_DATE=" version)
         outputs (fs/path project-dir "outputs" version)
         schematics-outputs (fs/path outputs "schematics")
         toolkit-outputs (fs/path project-dir "production")]
@@ -50,6 +53,7 @@
      ["pcb" "export" "pdf"
       "-o" (str (fs/path schematics-outputs (str project-name "-pcb-front.pdf")))
       "--scale" "0"
+      "-D" version-var
       "-l" "F.Cu,F.Mask,F.Silkscreen,Edge.Cuts,"
       (str pcb)])
     (shared/kicad-cli!
@@ -60,6 +64,7 @@
       "--erd"
       "--ev"
       "--mirror"
+      "-D" version-var
       "-l" "B.Cu,B.Mask,B.Silkscreen,Edge.Cuts,"
       (str pcb)])
     ;; Emit both the simplified (bounding-box components) and full-fidelity STEP
@@ -70,13 +75,22 @@
      ["--keep-full"
       "-o" (str (fs/path outputs (str project-name ".simplified.step")))
       (str pcb)])
-    (shared/run-fabrication-toolkit!
-     project-dir
-     pcb
-     ["--autoTranslate"
-      "--autoFill"
-      "--excludeDNP"
-      "--nonInteractive"])
+    ;; Fabrication Toolkit resolves text variables through pcbnew and has no
+    ;; -D equivalent, so define the variable in the project file while it
+    ;; plots. pcbnew prefers the board file's cached (property ...) copy of
+    ;; the variable over the project file, so update that too.
+    (shared/with-text-variable
+      project-file "KKH_VERSION_DATE" version
+      #(shared/with-board-text-variable
+         pcb "KKH_VERSION_DATE" version
+         (fn []
+           (shared/run-fabrication-toolkit!
+            project-dir
+            pcb
+            ["--autoTranslate"
+             "--autoFill"
+             "--excludeDNP"
+             "--nonInteractive"]))))
     (filter-positions-to-bom! toolkit-outputs)
     (shared/copy-non-zip-contents! toolkit-outputs outputs)
     (fs/copy (shared/production-zip toolkit-outputs project-name)
