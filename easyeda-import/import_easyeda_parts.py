@@ -232,6 +232,20 @@ def rename_symbol_lcsc_field(symbol_file: Path) -> None:
         symbol_file.write_text(updated)
 
 
+def rename_footprint_lcsc_fields(pretty_dir: Path) -> None:
+    """easyeda2kicad also stamps "LCSC Part" as a property on every generated
+    footprint; left alone, a schematic<->board field sync copies that name back
+    onto placed symbols even though the symbol library says "LCSC". Rename it
+    with the same safe literal replacement as rename_symbol_lcsc_field."""
+    if not pretty_dir.is_dir():
+        return
+    for mod in pretty_dir.glob("*.kicad_mod"):
+        text = mod.read_text()
+        updated = text.replace('"LCSC Part"', '"LCSC"')
+        if updated != text:
+            mod.write_text(updated)
+
+
 def _ensure_chooser_path() -> None:
     """Put this script's own directory on sys.path so the sibling footprint
     modules import cleanly even when run via the bin/ symlink."""
@@ -1198,6 +1212,7 @@ def main() -> None:
         )
         staged_sym = staging_root / relative_lib_dir / f"{lib_name}.kicad_sym"
         rename_symbol_lcsc_field(staged_sym)
+        rename_footprint_lcsc_fields(staging_root / relative_lib_dir / f"{lib_name}.pretty")
         add_missing_descriptions(staged_sym, parts)
 
         if not args.no_standard_symbols:

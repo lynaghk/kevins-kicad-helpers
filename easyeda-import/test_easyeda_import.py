@@ -345,6 +345,24 @@ def test_rename_lcsc_field():
     assert lib.read_text() == text
 
 
+def test_rename_lcsc_field_in_footprints():
+    pretty = _TMP / "rename.pretty"
+    pretty.mkdir(exist_ok=True)
+    mod = pretty / "IND-SMD_L4.0-W4.0_FNR40XXS.kicad_mod"
+    mod.write_text(
+        '(footprint "IND-SMD_L4.0-W4.0_FNR40XXS"\n'
+        '\t(property "LCSC Part" "C167888")\n'
+        "\t(pad 1 smd rect (at -1.50 0.00 0.00) (size 1.600 3.900) (layers F.Cu))\n"
+        ")\n"
+    )
+    imp.rename_footprint_lcsc_fields(pretty)
+    text = mod.read_text()
+    assert '(property "LCSC" "C167888")' in text and '"LCSC Part"' not in text
+    imp.rename_footprint_lcsc_fields(pretty)  # idempotent
+    assert mod.read_text() == text
+    imp.rename_footprint_lcsc_fields(_TMP / "no-such.pretty")  # missing dir is a no-op
+
+
 def test_set_symbol_property_inserts_parseable_ft_rotation():
     lib = _TMP / "ftrot.kicad_sym"
     lib.write_text(SYMBOL_LIB.replace('"LCSC Part"', '"LCSC"'))
