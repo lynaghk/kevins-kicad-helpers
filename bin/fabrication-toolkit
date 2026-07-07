@@ -98,6 +98,14 @@ fi
 cd "${module_root}"
 export PYTHONPATH="${module_root}${PYTHONPATH:+:${PYTHONPATH}}"
 
+# wx.App's GTK init makes blocking D-Bus calls (AT-SPI bus activation, or
+# autolaunch when no session bus is set) that can stall for the full 25s
+# D-Bus call timeout. The CLI never needs D-Bus, so give it a dead address
+# that fails instantly.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent"
+fi
+
 # The plugin builds a wx.App, which needs a display even in CLI mode.
 runner=("${script_dir}/kicad-python")
 if [[ "$(uname -s)" != "Darwin" && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
@@ -110,12 +118,30 @@ if [[ "$(uname -s)" != "Darwin" && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}
 fi
 
 "${runner[@]}" -c '
+import os
 import runpy
 import sys
+import threading
+import traceback
 import wx
 
 module = sys.argv[1]
 sys.argv = [module] + sys.argv[2:]
 app = wx.App(False)
-runpy.run_module(module, run_name="__main__", alter_sys=True)
+code = 0
+try:
+    runpy.run_module(module, run_name="__main__", alter_sys=True)
+except SystemExit as e:
+    code = e.code if isinstance(e.code, int) else 1
+except BaseException:
+    traceback.print_exc()
+    code = 1
+for thread in threading.enumerate():
+    if thread is not threading.current_thread() and not thread.daemon:
+        thread.join()
+# wx/GTK teardown can deadlock at interpreter exit (seen on Linux under
+# Xvfb), so once the plugin threads finish, skip it.
+sys.stdout.flush()
+sys.stderr.flush()
+os._exit(code)
 ' "${module}" "$@" 2> >(filter_errors)
