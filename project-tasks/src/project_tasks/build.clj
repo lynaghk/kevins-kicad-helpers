@@ -28,6 +28,13 @@
       (.write writer "\uFEFF")
       (csv/write-csv writer (cons header (filter (comp in-bom first) rows))))))
 
+(defn inner-copper-layers
+  "Inner copper layer names from the PCB's board layer table, in stackup order.
+  Matching the numeric-id tuple form (<id> \"In<n>.Cu\" signal) keeps footprint
+  pads' quoted (layers ...) lists from matching."
+  [pcb]
+  (into [] (map second) (re-seq #"\(\d+ \"(In\d+\.Cu)\"" (slurp (str pcb)))))
+
 (defn run! [repo-dir {:keys [project-dir project-file project-name schematic pcb] :as project} force?]
   (when-not force?
     (try
@@ -61,6 +68,17 @@
       "-D" version-var
       "-l" "F.Cu,F.Mask,F.Silkscreen,Edge.Cuts,"
       (str pcb)])
+    (doseq [layer (inner-copper-layers pcb)]
+      (shared/kicad-cli!
+       project-dir
+       ["pcb" "export" "pdf"
+        "-o" (str (fs/path schematics-outputs
+                           (str project-name "-pcb-"
+                                (str/lower-case (fs/strip-ext layer)) ".pdf")))
+        "--scale" "0"
+        "-D" version-var
+        "-l" (str layer ",Edge.Cuts,")
+        (str pcb)]))
     (shared/kicad-cli!
      project-dir
      ["pcb" "export" "pdf"

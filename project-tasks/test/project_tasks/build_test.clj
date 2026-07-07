@@ -11,6 +11,38 @@
       (finally
         (fs/delete-tree root)))))
 
+(defn spit-pcb [root & copper-layers]
+  (let [pcb (fs/path root "board.kicad_pcb")]
+    (spit (fs/file pcb)
+          (str "(kicad_pcb\n"
+               "\t(layers\n"
+               (apply str (map-indexed (fn [i layer]
+                                         (str "\t\t(" (* 2 i) " \"" layer "\" signal)\n"))
+                                       copper-layers))
+               "\t\t(25 \"Edge.Cuts\" user)\n"
+               "\t)\n"
+               ;; Footprint pads carry their own quoted (layers ...) lists,
+               ;; which must not be mistaken for the board layer table.
+               "\t(footprint \"R_0402\"\n"
+               "\t\t(pad \"1\" smd rect\n"
+               "\t\t\t(layers \"*.Cu\" \"*.Mask\")\n"
+               "\t\t)\n"
+               "\t)\n"
+               ")\n"))
+    pcb))
+
+(deftest inner-copper-layers-of-four-layer-board
+  (with-temp-tree
+    (fn [root]
+      (let [pcb (spit-pcb root "F.Cu" "In1.Cu" "In2.Cu" "B.Cu")]
+        (is (= ["In1.Cu" "In2.Cu"] (build/inner-copper-layers pcb)))))))
+
+(deftest inner-copper-layers-of-two-layer-board
+  (with-temp-tree
+    (fn [root]
+      (let [pcb (spit-pcb root "F.Cu" "B.Cu")]
+        (is (= [] (build/inner-copper-layers pcb)))))))
+
 (def positions-header "Designator,Mid X,Mid Y,Rotation,Layer")
 
 (defn spit-positions [root & rows]
