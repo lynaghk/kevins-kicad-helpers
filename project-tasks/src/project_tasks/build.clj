@@ -12,11 +12,16 @@
 
 (defn filter-positions-to-bom!
   "Drop rows from positions.csv for parts the BOM does not list, e.g. footprints
-  that only have the exclude-from-BOM fabrication attribute set (mounting holes)."
+  that only have the exclude-from-BOM fabrication attribute set (mounting holes).
+  The Fabrication Toolkit writes no bom.csv at all when every footprint is
+  excluded (nothing to assemble), so a missing file means an empty BOM."
   [toolkit-outputs]
-  (let [in-bom (->> (read-csv (fs/path toolkit-outputs "bom.csv"))
-                    rest
-                    (into #{} (mapcat #(str/split (first %) #",\s*"))))
+  (let [bom (fs/path toolkit-outputs "bom.csv")
+        in-bom (if (fs/exists? bom)
+                 (->> (read-csv bom)
+                      rest
+                      (into #{} (mapcat #(str/split (first %) #",\s*"))))
+                 #{})
         positions (fs/path toolkit-outputs "positions.csv")
         [header & rows] (read-csv positions)]
     (with-open [writer (io/writer (fs/file positions))]
