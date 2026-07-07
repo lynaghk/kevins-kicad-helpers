@@ -139,11 +139,56 @@
                   db))))))
 
 (deftest check-power-test
-  (testing "a schematic with no max_mA attributes reports a zero total"
+  (testing "a schematic with no max_mA attributes prints nothing"
     (let [db (kicad/components->db [{:instance/ref "R1"
-                                     :instance/value "10k"}])
+                                     :instance/value "10k"}])]
+      (is (= "" (with-out-str (kicad/check-power! db))))))
+
+  (testing "a schematic with max_mA attributes prints the table and total"
+    (let [db (kicad/components->db [{:instance/ref "U1"
+                                     :instance/value "MCU"
+                                     :instance/symbol {:symbol/id "lib:MCU"
+                                                       :symbol/part "MCU"}
+                                     :instance/attributes [{:attribute/name "max_mA"
+                                                            :attribute/value 5.5}]}])
           out (with-out-str (kicad/check-power! db))]
-      (is (str/includes? out "Total: 0.00 mA")))))
+      (is (str/includes? out "ic power"))
+      (is (str/includes? out "Total: 5.50 mA")))))
+
+(deftest check-i2c-test
+  (testing "a schematic with no i2c attributes prints nothing"
+    (let [db (kicad/components->db [{:instance/ref "R1"
+                                     :instance/value "10k"}])]
+      (is (= "" (with-out-str (kicad/check-i2c! db))))))
+
+  (testing "a schematic with i2c attributes prints the address table"
+    (let [db (kicad/components->db [{:instance/ref "U2"
+                                     :instance/value "Sensor"
+                                     :instance/attributes [{:attribute/name "i2c"
+                                                            :attribute/value (sorted-set 0x48)}]}])
+          out (with-out-str (kicad/check-i2c! db))]
+      (is (str/includes? out "i2c addresses"))
+      (is (str/includes? out "0x48")))))
+
+(deftest check-total-capacitance-test
+  (testing "a schematic with no capacitors on the power nets prints nothing"
+    (let [db (kicad/components->db [{:instance/ref "R1"
+                                     :instance/value "10k"}])]
+      (is (= "" (with-out-str (kicad/check-total-capacitance! db))))))
+
+  (testing "a schematic with capacitors on a power net prints the totals"
+    (let [db (kicad/netlist-data->db
+              {:symbols []
+               :instances [{:instance/ref "C1"
+                            :instance/value "100nF"
+                            :instance/pins [{:pin/number "1"}
+                                            {:pin/number "2"}]}]
+               :nets [{:net/name "VCC"
+                       :net/nodes [{:node/ref "C1"
+                                    :node/pin-number "1"}]}]})
+          out (with-out-str (kicad/check-total-capacitance! db))]
+      (is (str/includes? out "total capacitance"))
+      (is (str/includes? out "0.10")))))
 
 (deftest datascript-db-test
   (let [db (kicad/netlist->db sample-netlist)]

@@ -125,11 +125,9 @@
   [[name value]]
   (when (some? value)
     (let [parse (attribute-parsers name)]
-      (if-some [parsed (if parse (parse value) value)]
+      (when-some [parsed (if parse (parse value) value)]
         {:attribute/name name
-         :attribute/value parsed}
-        (binding [*out* *err*]
-          (println (format "Skipping unparseable attribute %s=%s" name (pr-str value))))))))
+         :attribute/value parsed}))))
 
 (defn- attributes
   [node]
@@ -260,15 +258,20 @@
 
 
 (defn check-i2c!
+  "Prints nothing when no part in the schematic has an i2c attribute."
   [db]
   (let [refs-by-addr (i2c-addresses db)]
+    (when (seq refs-by-addr)
+      (print "i2c addresses")
+      (clojure.pprint/print-table (sort-by :addr (for [[addr refs] refs-by-addr]
+                                                   {:addr addr :refs (clojure.string/join " "  (sort refs))})))
 
-    (clojure.pprint/print-table (sort-by :addr (for [[addr refs] refs-by-addr]
-                                                 {:addr addr :refs (clojure.string/join " "  (sort refs))})))
+      (doseq [[addr refs] refs-by-addr
+              :when (< 1 (count refs))]
+        (throw (ex-info (str "Addr " addr " matches multiple refs: " refs)
+                        {:addr addr :refs refs})))
 
-    (doseq [[addr refs] refs-by-addr
-            :when (< 1 (count refs))]
-      (throw (ex-info (str "Addr " addr " matches multiple refs: " refs))))))
+      (println ""))))
 
 
 (def ^:private capacitance-multipliers
@@ -302,16 +305,19 @@
 
 
 (defn check-total-capacitance!
+  "Prints nothing when no capacitor sits on any of the checked power nets."
   [db]
   (let [rows (->> ["VCC" "VBUS"] ;;TODO: make this configurable
                   (keep (fn [net]
                           (when-let [c (net-capacitance db net)]
                             {:net net :total-uF (format "%.2f" (* c 1e6))}))))]
 
-    (clojure.pprint/print-table rows)
+    (when (seq rows)
+      (print "total capacitance:")
+      (clojure.pprint/print-table rows)
 
-    (doseq [{:keys [net total-uF]} rows]
-      (assert (< (Double/parseDouble total-uF) 10) (str "Net " net " exceeds USB spec 10uF capacitance")))))
+      (doseq [{:keys [net total-uF]} rows]
+        (assert (< (Double/parseDouble total-uF) 10) (str "Net " net " exceeds USB spec 10uF capacitance"))))))
 
 
 (defn- executable?
@@ -394,6 +400,7 @@
 
 
 (defn check-power!
+  "Prints nothing when no part in the schematic has a max_mA attribute."
   [db]
   (let [rows  (->> (d/q '{:find  [?part ?mA (count ?i)]
                           :where [[?i :instance/ref ?ref]
@@ -414,12 +421,15 @@
         table-width (->> (clojure.string/split table-str  #"\n") second count)
         total-ma (reduce + 0.0 (map #(Double/parseDouble (:total %)) rows))]
 
-    ;; TODO: make this configurable
-    (assert (<= total-ma 300))
+    (when (seq rows)
+      ;; TODO: make this configurable
+      (assert (<= total-ma 300))
 
-    (print table-str)
-    (println (apply str (repeat table-width "-")))
-    (println (format "Total: %.2f mA" total-ma))))
+      (print "ic power")
+      (print table-str)
+      (println (apply str (repeat table-width "-")))
+      (println (format "Total: %.2f mA" total-ma))
+      (println ""))))
 
 
 
@@ -431,15 +441,10 @@
   [schematic]
   (let [db (schematic->db schematic)]
 
-    (print "ic power")
     (check-power! db)
 
-    (println "")
-    (print "i2c addresses")
     (check-i2c! db)
 
-    (println "")
-    (println "total capacitance:")
     (check-total-capacitance! db)
 
     ;;
