@@ -435,7 +435,7 @@ def rewrite_rep_items(step, rep_id, drop_ids, new_brep_id):
     """In a shape-representation, drop item refs in `drop_ids` and add new_brep."""
     body = step.bodies[rep_id]
     # TYPE('label',(items...),#ctx)
-    m = re.match(r"([A-Z_0-9]+)\('((?:[^']|'')*)',\((.*)\),(#\d+)\s*\)$", body)
+    m = re.match(r"([A-Z_0-9]+)\('((?:[^']|'')*)'\s*,\s*\((.*)\)\s*,\s*(#\d+)\s*\)$", body)
     if not m:
         return False
     typ, label, items, ctx = m.groups()
