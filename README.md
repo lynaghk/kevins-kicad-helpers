@@ -1,63 +1,36 @@
 # Kevin's KiCad helpers.
 
-Get `bin/` on your PATH — anywhere, anyhow — and you have everything.
-Vendor this repo per project (e.g. as a git submodule) or clone it once systemwide; the scripts pull their own tools at the versions pinned in this repo's mise.toml, so the only machine requirement is [mise](https://mise.jdx.dev).
+These are some helpers I've unashamedly vibe-coded to help streamline my KiCad workflows.
+I haven't been able to write up a proper overview/README yet, so until then please see [my newsletter article for more details](https://kevinlynagh.com/newsletter/2026_07_kevins_kicad_helpers/).
 
-- `bin/` has one-off tools you can invoke wherever.
-- `project-tasks/` is a suite of Babashka helpers to check and build KiCad projects.
+These tools work well enough for me, and I'm sharing them more as a "these fell off the back of a truck, maybe you'll find them helpful" rather than as "I Run an Impressive and Important Open Soruce Project".
 
-## Importing parts from EasyEDA/LCSC
+I'm happy to discuss ideas and collaborate on PRs *with humans* insomuch as our needs overlap.
+I'm running KiCad 10 on MacOS and the scripts seem to mostly work for KiCAD 10 on Debian Linux as well (where I have LLM agents use 'em).
 
-From anywhere inside your KiCad project, run:
+In terms of structure:
 
+- `bin/` has symlinks to one-off tools, just put this on your `$PATH`.
+- `project-tasks/` are helpers to build KiCad projects.
+- everything else is a tool-specific folder, most of which have verbose, LLM-written READMEs.
+
+
+## Install
+
+These scripts rely on [mise-en-place](https://mise.jdx.dev) and [UV](https://docs.astral.sh/uv/getting-started/installation/) (TODO: specify latter with former and verify it works with shebangs if UV is not globally available.)
+
+I vendor this repository as a git submodule in my project repositories.
+I add to those project's root `mise.toml` files the following:
+
+```toml
+[env]
+_.path = ["{{config_root}}/vendor/kevins-kicad-helpers/bin"]
 ```
-bin/kkh-import-easyeda-parts C5123975 C3681116   # LCSC part numbers
-```
 
-This uses [easyeda2kicad](https://github.com/uPesy/easyeda2kicad.py) to pull each
-part's symbol, footprint, and 3D model, then walks you through confirming each
-part before anything is written. Nothing touches your project until you press
-Enter: downloads are staged in a temp dir, and the footprint chooser doubles as
-the import gate — Enter imports the part with the highlighted footprint, `q`/Esc
-skips it entirely. Confirmed parts land in the project-local libraries
-(`0_<project>.kicad_sym`, `0_<project>.pretty/`, `0_<project>.3dshapes/`,
-registered in `sym-lib-table`/`fp-lib-table`).
 
-Before downloading, each part number is checked against libraries you already
-have: parts already in the project library are skipped (reimport with
-`--overwrite`), and parts provided by an installed KiCad library — e.g.
-[JLCPCB-Kicad-Library](https://github.com/CDFER/JLCPCB-Kicad-Library), whose
-symbols carry LCSC part numbers — are offered as-is (`skip and place
-PCM_JLCPCB-…:… directly`, the default) or imported as a copy anyway. Detection
-reads the global `sym-lib-table` plus KiCad's PCM `3rdparty/symbols` tree.
 
-The chooser offers KiCad's standard footprints in place of the generated one:
-candidates are matched by package + pad count, ranked by actual pad-area
-overlap, and shown as origin/scale-aligned previews (arrow keys compare,
-`space` peeks at the EasyEDA original, `r` rotates, `f` shows the back, `?` for
-help). Choosing a standard footprint writes its `lib:footprint` into the symbol,
-records any 90° orientation difference as an `FT Rotation Offset` field (used by
-the JLCPCB Fabrication Toolkit), and never copies the generated files at all. It
-also checks KiCad's standard _symbol_ libraries by MPN and tells you when the
-part already ships with KiCad (e.g. `Regulator_Linear:AMS1117-3.3`) — meaning
-you may not need the import at all. Useful flags: `--project` (point at /
-disambiguate a `.kicad_pro`), `--lib-name`, `--auto-single`,
-`--non-interactive` (no prompts — skip installed duplicates, import the rest
-with their generated footprints, print the candidate/symbol report; good for
-scripted or agent-driven analysis), `--import-duplicates`,
-`--no-standard-footprints`, `--no-standard-symbols`, `--kicad-footprints-dir`,
-`--kicad-symbols-dir`, `--kicad-config-dir`, `--overwrite`.
+## ---LLM-generated text follows---
 
-Imported two-pin resistors and capacitors are restyled to match the look of the
-JLCPCB-Kicad-Library above: pin numbers hidden, the value parsed from the part
-description (`2kΩ`, `1nF`) shown as the schematic Value, and capacitors showing
-their rated voltage below it.
-Resistor networks, polarized capacitors, and parts whose description doesn't
-parse keep their generated symbols; `--no-passive-style` turns the restyling off
-entirely.
-
-The code lives in `easyeda-import/` (the `bin/` entry is a symlink); its offline
-tests run with `uv run easyeda-import/test_easyeda_import.py`.
 
 ## KiCad tool shims
 
