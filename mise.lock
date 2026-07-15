@@ -42,3 +42,84 @@ url_api = "https://api.github.com/repos/babashka/babashka/releases/assets/400752
 [[tools."github:weavejester/cljfmt"]]
 version = "0.16.4"
 backend = "github:weavejester/cljfmt"
+
+[tools."github:weavejester/cljfmt"."platforms.linux-arm64"]
+checksum = "sha256:15ea231fd36d2bb9eff904b065aa19167e2bcc48372208bbca81ffc7f24e083b"
+url = "https://github.com/weavejester/cljfmt/releases/download/0.16.4/cljfmt-0.16.4-linux-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/weavejester/cljfmt/releases/assets/395485996"
+
+[tools."github:weavejester/cljfmt"."platforms.linux-arm64-musl"]
+checksum = "sha256:15ea231fd36d2bb9eff904b065aa19167e2bcc48372208bbca81ffc7f24e083b"
+url = "https://github.com/weavejester/cljfmt/releases/download/0.16.4/cljfmt-0.16.4-linux-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/weavejester/cljfmt/releases/assets/395485996"
+
+[tools."github:weavejester/cljfmt"."platforms.linux-x64"]
+checksum = "sha256:02945f2d06f52ec8c28c33b197acc7ffe72642295fde135899820fb88c000bb5"
+url = "https://github.com/weavejester/cljfmt/releases/download/0.16.4/cljfmt-0.16.4-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/weavejester/cljfmt/releases/assets/395485991"
+
+[tools."github:weavejester/cljfmt"."platforms.linux-x64-musl"]
+checksum = "sha256:02945f2d06f52ec8c28c33b197acc7ffe72642295fde135899820fb88c000bb5"
+url = "https://github.com/weavejester/cljfmt/releases/download/0.16.4/cljfmt-0.16.4-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/weavejester/cljfmt/releases/assets/395485991"
+
+[tools."github:weavejester/cljfmt"."platforms.macos-arm64"]
+checksum = "sha256:475f779f1534c2a1113c10c12bc69b0e4c1c3f47d6f5f1d70037e1e75776c658"
+url = "https://github.com/weavejester/cljfmt/releases/download/0.16.4/cljfmt-0.16.4-darwin-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/weavejester/cljfmt/releases/assets/395486000"
+
+[tools."github:weavejester/cljfmt"."platforms.macos-x64"]
+checksum = "sha256:e864cafd01f4cfb428c79245196bb885a70688bbc15662501efc342b6b0c300c"
+url = "https://github.com/weavejester/cljfmt/releases/download/0.16.4/cljfmt-0.16.4-standalone.jar"
+url_api = "https://api.github.com/repos/weavejester/cljfmt/releases/assets/395485997"
+
+[tools."github:weavejester/cljfmt"."platforms.windows-x64"]
+checksum = "sha256:89ceb4fde63bdd551ee2f15e13e17f2d3093cefaa601e448b9244dfbcf4c7b0e"
+url = "https://github.com/weavejester/cljfmt/releases/download/0.16.4/cljfmt-0.16.4-win-amd64.zip"
+url_api = "https://api.github.com/repos/weavejester/cljfmt/releases/assets/395485994"
+
+[[tools.uv]]
+version = "0.11.16"
+backend = "aqua:astral-sh/uv"
+
+[tools.uv."platforms.linux-arm64"]
+checksum = "sha256:ac022d96411143b9a2dd75ea711fa8dd4cd14538bf248f2e5df3c10a80f7f6a4"
+url = "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/426514847"
+provenance = "github-attestations"
+
+[tools.uv."platforms.linux-arm64-musl"]
+checksum = "sha256:ac022d96411143b9a2dd75ea711fa8dd4cd14538bf248f2e5df3c10a80f7f6a4"
+url = "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/426514847"
+provenance = "github-attestations"
+
+[tools.uv."platforms.linux-x64"]
+checksum = "sha256:1bc4be1be0a000f893b0d1db97906cf392b63fa22fda9a0ecf33d0d4bbb4bc9a"
+url = "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/426514923"
+provenance = "github-attestations"
+
+[tools.uv."platforms.linux-x64-musl"]
+checksum = "sha256:1bc4be1be0a000f893b0d1db97906cf392b63fa22fda9a0ecf33d0d4bbb4bc9a"
+url = "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/426514923"
+provenance = "github-attestations"
+
+[tools.uv."platforms.macos-arm64"]
+checksum = "sha256:2b25be1af546be330b340b0a76b99f989daa6d92678fdffb87438e661e9d88fb"
+url = "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/426514831"
+provenance = "github-attestations"
+
+[tools.uv."platforms.macos-x64"]
+checksum = "sha256:6b91ae3de155f51bd1f5b74814821c79f016a176561f252cd9ddfb976939af2e"
+url = "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/426514909"
+provenance = "github-attestations"
+
+[tools.uv."platforms.windows-x64"]
+checksum = "sha256:dd9d6d6554bfab265bfa98aa8e8a406c5c3a7b97582f93de1f4d48d9154a0395"
+url = "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/426514912"
+provenance = "github-attestations"

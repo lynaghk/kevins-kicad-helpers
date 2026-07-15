@@ -17,12 +17,7 @@ In terms of structure:
 
 ## Install
 
-These scripts rely on:
-
-- [mise-en-place](https://mise.jdx.dev)
-- [UV](https://docs.astral.sh/uv/getting-started/installation/)
-
-and within KiCad, the plugins:
+These scripts rely on [mise-en-place](https://mise.jdx.dev) and, within KiCad, the plugins:
 
 - [bennymeg/Fabrication-Toolkit](https://github.com/bennymeg/Fabrication-Toolkit)
 - [CDFER/JLCPCB-Kicad-Library](https://github.com/CDFER/JLCPCB-Kicad-Library)
