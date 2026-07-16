@@ -33,7 +33,7 @@ _.path = ["{{config_root}}/vendor/kevins-kicad-helpers/bin"]
 
 ### kkh build
 
-Run `kkh build` in a folder and it'll create an output directory next to every `*.kicad_pro` it finds in any subfolder.
+Run `kkh build` anywhere in a git repository and it'll create an output directory next to every `*.kicad_pro` it finds under that repository.
 The outputs are named with the date, git revision, and also indicate whether there are unstaged changes in the repository working tree:
 
 ```
@@ -53,6 +53,7 @@ The outputs are named with the date, git revision, and also indicate whether the
 
 This one command runs schematic DRC, PCB ERC, and custom analysis checks, then builds all of the output files required to place a JLCPCB assembly order.
 (Run `kkh check` if you want everything but the build.)
+Run `kkh list` to see the repo-relative board names you can pass to `kkh build <board>` or `kkh check <board>`.
 
 The build script also exposes the version string as a KiCad variable, so add `${KKH_VERSION_DATE}` to your PCB silkscreen to get the version in the output Gerber files.
 

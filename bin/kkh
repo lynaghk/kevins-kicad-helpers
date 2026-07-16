@@ -2,8 +2,8 @@
 #
 # Entry point for the project tasks: kkh list | check | build.
 #
-# Works from anywhere inside a consuming KiCad project (the Clojure side walks
-# up from the working directory to the nearest ancestor with a pcbs/ folder).
+# Works from anywhere inside a consuming KiCad repository (the Clojure side
+# resolves the Git root and scans it for KiCad projects).
 # Consuming repos need no bb.edn and no tool pins of their own: every tool
 # runs at the version pinned in this repo's mise.toml, so invoking this script
 # is the whole contract. The only requirement is mise itself.
@@ -12,6 +12,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 KKH_REPO=$(realpath "$SCRIPT_DIR/..")
+export KKH_REPO
 
 if ! command -v mise >/dev/null 2>&1; then
     echo "Error: kkh needs 'mise' on PATH (https://mise.jdx.dev) to provide its pinned tools." >&2

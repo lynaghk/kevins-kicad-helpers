@@ -1,5 +1,6 @@
 (ns project-tasks.shared-test
   (:require [babashka.fs :as fs]
+            [babashka.process]
             [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
@@ -12,33 +13,58 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest find-repo-dir-in-repo-root
+(defn git-init! [root]
+  (let [{:keys [exit err]} @(babashka.process/process ["git" "init"]
+                                                       {:dir (str root)
+                                                        :out :string
+                                                        :err :string})]
+    (when-not (zero? exit)
+      (throw (ex-info err {})))))
+
+(defn same-path? [expected actual]
+  (= (str (fs/canonicalize expected))
+     (some-> actual fs/canonicalize str)))
+
+(deftest find-repo-dir-in-git-root
   (with-temp-tree
     (fn [root]
-      (fs/create-dirs (fs/path root "pcbs"))
-      (is (= (str root) (some-> (shared/find-repo-dir root) str))))))
+      (git-init! root)
+      (is (same-path? root (shared/find-repo-dir root))))))
 
 (deftest find-repo-dir-walks-up-from-subdir
   (with-temp-tree
     (fn [root]
-      (fs/create-dirs (fs/path root "pcbs" "some-board"))
+      (git-init! root)
+      (fs/create-dirs (fs/path root "hardware" "some-board"))
       (fs/create-dirs (fs/path root "firmware" "src"))
-      (is (= (str root)
-             (some-> (shared/find-repo-dir (fs/path root "pcbs" "some-board")) str)))
-      (is (= (str root)
-             (some-> (shared/find-repo-dir (fs/path root "firmware" "src")) str))))))
+      (is (same-path? root
+                      (shared/find-repo-dir (fs/path root "hardware" "some-board"))))
+      (is (same-path? root
+                      (shared/find-repo-dir (fs/path root "firmware" "src")))))))
 
-(deftest find-repo-dir-prefers-nearest-ancestor
+(deftest find-repo-dir-prefers-nearest-git-ancestor
   (with-temp-tree
     (fn [root]
       (let [inner (fs/path root "nested-project")]
-        (fs/create-dirs (fs/path root "pcbs"))
-        (fs/create-dirs (fs/path inner "pcbs"))
+        (git-init! root)
+        (fs/create-dirs inner)
+        (git-init! inner)
         (fs/create-dirs (fs/path inner "docs"))
-        (is (= (str inner)
-               (some-> (shared/find-repo-dir (fs/path inner "docs")) str)))))))
+        (is (same-path? inner
+                        (shared/find-repo-dir (fs/path inner "docs"))))))))
 
-(deftest find-repo-dir-nil-when-no-pcbs-anywhere
+(deftest find-repo-dir-matches-symlinked-start-dir
+  (with-temp-tree
+    (fn [root]
+      (let [real-root (fs/path root "real-project")
+            linked-root (fs/path root "linked-project")]
+        (fs/create-dirs (fs/path real-root "docs"))
+        (git-init! real-root)
+        (fs/create-sym-link linked-root real-root)
+        (is (same-path? linked-root
+                        (shared/find-repo-dir (fs/path linked-root "docs"))))))))
+
+(deftest find-repo-dir-nil-when-outside-git
   (with-temp-tree
     (fn [root]
       (fs/create-dirs (fs/path root "src"))

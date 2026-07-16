@@ -9,19 +9,18 @@
   (throw (ex-info message {})))
 
 (defn find-repo-dir
-  "Nearest ancestor of start-dir (inclusive) containing a pcbs/ directory, or nil."
+  "Git worktree root containing start-dir, or nil when outside Git."
   [start-dir]
-  (->> (fs/absolutize start-dir)
-       (iterate fs/parent)
-       (take-while some?)
-       (filter #(fs/directory? (fs/path % "pcbs")))
-       first))
+  (let [{:keys [exit out]} @(p/process ["git" "rev-parse" "--show-toplevel"]
+                                       {:dir (str start-dir)
+                                        :out :string
+                                        :err :string})]
+    (when (zero? exit)
+      (fs/path (str/trim out)))))
 
 (defn repo-dir []
-  (or (some-> (find-repo-dir (fs/cwd)) str)
-      (fail! (str "Could not find a pcbs/ directory in "
-                  (fs/cwd)
-                  " or any parent directory."))))
+  (str (or (find-repo-dir (fs/cwd))
+           (fs/absolutize (fs/cwd)))))
 
 (defn command-result [dir args]
   @(p/process args
@@ -60,42 +59,79 @@
     (git-working-tree-dirty? repo-dir)
     (str "-dirty")))
 
-(defn project-from-dir [board-dir]
-  (let [project-files (->> (fs/glob board-dir "*.kicad_pro")
-                           (filter fs/regular-file?)
-                           sort
-                           vec)]
-    (when-not (= 1 (count project-files))
-      (fail! (str "Expected exactly one root-level .kicad_pro file in "
-                  board-dir
-                  ", found "
-                  (count project-files)
-                  ".")))
-    (let [project-file (first project-files)
-          project-name (str (fs/strip-ext (fs/file-name project-file)))
-          schematic (fs/path board-dir (str project-name ".kicad_sch"))
-          pcb (fs/path board-dir (str project-name ".kicad_pcb"))]
-      (when-not (fs/regular-file? schematic)
-        (fail! (str "Could not find matching schematic: " schematic)))
-      (when-not (fs/regular-file? pcb)
-        (fail! (str "Could not find matching PCB: " pcb)))
-      {:board-name (str (fs/file-name board-dir))
-       :project-dir board-dir
-       :project-file project-file
-       :project-name project-name
-       :schematic schematic
-       :pcb pcb})))
+(defn- ignored-discovery-dir? [repo-dir dir]
+  (let [repo-dir (fs/absolutize repo-dir)
+        dir (fs/absolutize dir)
+        name (str (fs/file-name dir))
+        kkh-repo (some-> (System/getenv "KKH_REPO")
+                         str/trim
+                         not-empty
+                         fs/path)]
+    (or (= ".git" name)
+        (and (str/starts-with? name ".")
+             (not= dir repo-dir))
+        (#{"outputs" "production"} name)
+        (and kkh-repo
+             (not= (fs/absolutize repo-dir) (fs/absolutize kkh-repo))
+             (= (fs/absolutize dir) (fs/absolutize kkh-repo))))))
+
+(defn- project-dirs [repo-dir]
+  (letfn [(walk [dir]
+            (when-not (ignored-discovery-dir? repo-dir dir)
+              (let [children (->> (fs/list-dir dir)
+                                  (sort-by str))]
+                (concat
+                 (when (seq (filter #(and (fs/regular-file? %)
+                                          (= "kicad_pro" (fs/extension %)))
+                                    children))
+                   [dir])
+                 (mapcat walk (filter fs/directory? children))))))]
+    (->> (walk (fs/path repo-dir))
+         distinct)))
+
+(defn- board-name [repo-dir project-dir project-name]
+  (let [relative (str (fs/relativize repo-dir project-dir))]
+    (if (or (str/blank? relative) (= "." relative))
+      project-name
+      relative)))
+
+(defn project-from-dir
+  ([board-dir]
+   (project-from-dir board-dir board-dir))
+  ([repo-dir board-dir]
+   (let [project-files (->> (fs/glob board-dir "*.kicad_pro")
+                            (filter fs/regular-file?)
+                            sort
+                            vec)]
+     (when-not (= 1 (count project-files))
+       (fail! (str "Expected exactly one root-level .kicad_pro file in "
+                   board-dir
+                   ", found "
+                   (count project-files)
+                   ".")))
+     (let [project-file (first project-files)
+           project-name (str (fs/strip-ext (fs/file-name project-file)))
+           schematic (fs/path board-dir (str project-name ".kicad_sch"))
+           pcb (fs/path board-dir (str project-name ".kicad_pcb"))]
+       (when-not (fs/regular-file? schematic)
+         (fail! (str "Could not find matching schematic: " schematic)))
+       (when-not (fs/regular-file? pcb)
+         (fail! (str "Could not find matching PCB: " pcb)))
+       {:board-name (board-name repo-dir board-dir project-name)
+        :project-dir board-dir
+        :project-file project-file
+        :project-name project-name
+        :schematic schematic
+        :pcb pcb}))))
 
 (defn discover-projects [repo-dir]
-  (let [pcbs-dir (fs/path repo-dir "pcbs")]
-    (when-not (fs/directory? pcbs-dir)
-      (fail! (str "Could not find PCB directory: " pcbs-dir)))
-    (->> (fs/list-dir pcbs-dir)
-         (filter fs/directory?)
-         (filter #(seq (fs/glob % "*.kicad_pro")))
-         (map project-from-dir)
-         (sort-by :board-name)
-         vec)))
+  (let [projects (->> (project-dirs repo-dir)
+                      (map #(project-from-dir repo-dir %))
+                      (sort-by :board-name)
+                      vec)]
+    (when (empty? projects)
+      (fail! (str "No KiCad projects found under " repo-dir ".")))
+    projects))
 
 (defn kicad-cli! [dir args]
   (shell! dir (into ["kicad-cli"] args)))
