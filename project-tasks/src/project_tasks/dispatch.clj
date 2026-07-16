@@ -50,22 +50,16 @@
     {:board-name (:board-name project)
      :success? true}
     (catch Exception error
-      (println (str "PCB " (:board-name project) " " action " failed:"))
+      (when-not (:kkh/complete-message? (ex-data error))
+        (println (str "PCB " (:board-name project) " " action " failed:")))
       (println (.getMessage error))
       {:board-name (:board-name project)
        :success? false})))
-
-(defn print-summary! [results]
-  (println "\nPCB summary:")
-  (doseq [{:keys [board-name success?]} results]
-    (println (str "  " board-name ": " (if success? "passed" "failed")))))
 
 (defn run-command! [repo-dir action args projects]
   (let [{:keys [force? all?] :as options} (parse-action action args projects)
         selected-projects (select-projects options projects)
         results (mapv #(run-project! repo-dir action force? %) selected-projects)]
-    (when all?
-      (print-summary! results))
     (if (every? :success? results) 0 1)))
 
 (defn run! [command args]

@@ -5,8 +5,11 @@
             [clojure.string :as str])
   (:import [java.time LocalDate]))
 
-(defn fail! [message]
-  (throw (ex-info message {})))
+(defn fail!
+  ([message]
+   (fail! message {}))
+  ([message data]
+   (throw (ex-info message data))))
 
 (defn find-repo-dir
   "Git worktree root containing start-dir, or nil when outside Git."

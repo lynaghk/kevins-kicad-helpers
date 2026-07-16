@@ -35,14 +35,68 @@
   [pcb]
   (into [] (map second) (re-seq #"\(\d+ \"(In\d+\.Cu)\"" (slurp (str pcb)))))
 
+(defn- diagnostic-line [line]
+  (some->> (re-matches #"\[[^\]]+\]:\s*(.+)" (str/trim line))
+           second
+           str/trim
+           not-empty))
+
+(defn- summary-line [line]
+  (some->> (re-matches #"\*\*\s+(.+)" (str/trim line))
+           second
+           str/trim
+           not-empty))
+
+(defn- report-details [report]
+  (when (fs/regular-file? report)
+    (let [lines (str/split-lines (slurp (str report)))]
+      {:summary (some summary-line lines)
+       :preview (->> lines
+                     (keep diagnostic-line)
+                     (take 3)
+                     seq)})))
+
+(defn- path-for-message [repo-dir path]
+  (let [repo-dir (fs/absolutize repo-dir)
+        path (fs/absolutize path)]
+    (try
+      (str (fs/relativize repo-dir path))
+      (catch Exception _
+        (str path)))))
+
+(defn format-check-failure [repo-dir {:keys [board-name]} check-failure]
+  (let [{:keys [check-label report]} check-failure
+        {:keys [summary preview]} (report-details report)]
+    (str "Could not build " board-name " because " check-label " failed.\n"
+         "\n"
+         "First errors from:\n"
+         "  " (path-for-message repo-dir report) "\n"
+         (when summary
+           (str "  " summary "\n"))
+         "\n"
+         (if (seq preview)
+           (str/join "\n" (map-indexed #(str "  " (inc %1) ". " %2) preview))
+           "  Report could not be previewed.")
+         "\n"
+         "\n"
+         "Fix these issues, inspect the report for the complete list, or rerun with --force.")))
+
 (defn run! [repo-dir {:keys [project-dir project-file project-name schematic pcb] :as project} force?]
   (when-not force?
     (try
       (check/run! repo-dir project)
       (catch Exception error
-        (shared/fail! (str "Build stopped because PCB checks failed.\n"
-                           (.getMessage error)
-                           "\nFix the reported issues, or rerun with --force.")))))
+        (if (= :kicad-check-failure (:kkh/error (ex-data error)))
+          (shared/fail! (format-check-failure repo-dir project (ex-data error))
+                        {:kkh/complete-message? true})
+          (shared/fail! (str "Could not build " (:board-name project)
+                             " because PCB checks failed.\n"
+                             "\n"
+                             (.getMessage error)
+                             "\n"
+                             "\n"
+                             "Fix the reported issues, or rerun with --force.")
+                        {:kkh/complete-message? true})))))
   (let [version (shared/build-version repo-dir)
         ;; Lets boards stamp the build version on the silkscreen by placing a
         ;; ${KKH_VERSION_DATE} text item.
