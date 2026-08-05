@@ -1,8 +1,9 @@
-/.clj-kondo/.cache/
-/.lsp/.cache/
-/.nrepl-port
-/.cpcache/
-/.shadow-cljs/
+.clj-kondo/.cache/
+.lsp/.cache/
+.nrepl-port
+.shadow-cljs/
+.cpcache/
+__pycache__/
 /target/
 /resources/public/js/
 /resources/public/style.css
