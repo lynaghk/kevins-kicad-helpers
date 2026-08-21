@@ -9,36 +9,36 @@
          '[clojure.string :as str]
          '[clojure.test :as t :refer [deftest is testing]])
 
-(load-file (str (fs/path (fs/parent (fs/canonicalize *file*)) "download-jlcpcb-parts-database")))
+(load-file (str (fs/path (fs/parent (fs/canonicalize *file*)) "download-jlcpcb-parts-database.clj")))
 
 ;; ---- fixture ----
 
 (def fixture-rows
-  [{:lcsc 1001 :category "Resistors" :library_type "base"
-    :price "1-199:0.0189,200-599:0.0163"
-    :attributes {"Resistance" "10kΩ" "Tolerance" "±1%" "Power(Watts)" "1/4W"
-                 "Voltage-Supply(Max)" "50V" "Temperature Coefficient" "±100ppm/℃"}}
-   {:lcsc 1002 :category "Resistors"
+  [{:lcsc       1001                                                                :category "Resistors" :library_type "base"
+    :price      "1-199:0.0189,200-599:0.0163"
+    :attributes {"Resistance"          "10kΩ" "Tolerance"               "±1%"       "Power(Watts)" "1/4W"
+                 "Voltage-Supply(Max)" "50V"  "Temperature Coefficient" "±100ppm/℃"}}
+   {:lcsc       1002                                         :category "Resistors"
     :attributes {"Resistance" "10mΩ" "Power(Watts)" "1/16W"}}
-   {:lcsc 1003 :category "Resistors"
+   {:lcsc       1003                                     :category "Resistors"
     :attributes {"Resistance" "1MΩ" "Tolerance" "±0.1%"}}
-   {:lcsc 1004 :category "Capacitors"
-    :attributes {"Capacitance" "100nF" "Tolerance" "±10%" "Voltage Rating" "50V"
+   {:lcsc       1004                                                             :category "Capacitors"
+    :attributes {"Capacitance"             "100nF" "Tolerance" "±10%" "Voltage Rating" "50V"
                  "Temperature Coefficient" "X7R"}}
-   {:lcsc 1005 :category "Capacitors"
-    :attributes {"Capacitance" "0.1uF" "Tolerance" "-20%~+80%"
+   {:lcsc       1005                                           :category "Capacitors"
+    :attributes {"Capacitance"             "0.1uF"      "Tolerance" "-20%~+80%"
                  "Temperature Coefficient" "-55℃~+125℃"}}
    ;; Blank category rescued via the description.
-   {:lcsc 1006 :category "" :description "Multilayer Ceramic Capacitors MLCC - SMD/SMT 100000pF"
+   {:lcsc       1006                       :category "" :description "Multilayer Ceramic Capacitors MLCC - SMD/SMT 100000pF"
     :attributes {"Capacitance" "100000pF"}}
-   {:lcsc 1007 :category "" :description "Thick Film Chip Resistor 10Ω 5%"
+   {:lcsc       1007                 :category "" :description "Thick Film Chip Resistor 10Ω 5%"
     :attributes {"Resistance" "10Ω"}}
    ;; A potentiometer has a resistance attribute but must stay out of `resistors`.
-   {:lcsc 1008 :category "" :description "Trimmer Potentiometer 10kΩ Top Adjustment"
+   {:lcsc       1008                  :category "" :description "Trimmer Potentiometer 10kΩ Top Adjustment"
     :attributes {"Resistance" "10kΩ"}}
    {:lcsc 1009 :category "Connectors" :attributes {}}
-   {:lcsc 1010 :category "Inductors (SMD)"
-    :attributes {"Inductance" "10uH" "Tolerance" "±20%" "Current Rating" "1.2A"
+   {:lcsc       1010                                                            :category "Inductors (SMD)"
+    :attributes {"Inductance"         "10uH" "Tolerance" "±20%" "Current Rating" "1.2A"
                  "DC Resistance(DCR)" "52mΩ"}}
    ;; Excluded: out of stock / not present.
    {:lcsc 1011 :category "Resistors" :stock 0 :attributes {"Resistance" "1kΩ"}}
@@ -46,13 +46,13 @@
    ;; Preferred counts as non-extended; malformed price becomes NULL.
    {:lcsc 1013 :category "Connectors" :preferred 1 :price "garbage"}
    ;; Upstream writes "8MΩ" on power-inductor DCR where it means mΩ.
-   {:lcsc 1014 :category "Inductors (SMD)"
+   {:lcsc       1014                                            :category "Inductors (SMD)"
     :attributes {"Inductance" "1uH" "DC Resistance(DCR)" "8MΩ"}}])
 
 (def row-defaults
-  {:category "" :subcategory "" :mfr "MFR-X" :manufacturer "Maker" :package "0402"
-   :joints 2 :description "" :datasheet "" :library_type "expand" :preferred 0
-   :stock 100 :present 1 :price ""})
+  {:category ""  :subcategory "" :mfr       "MFR-X" :manufacturer "Maker"  :package   "0402"
+   :joints   2   :description "" :datasheet ""      :library_type "expand" :preferred 0
+   :stock    100 :present     1  :price     ""})
 
 (declare insert-sql q build-fixture-db!)
 
@@ -61,9 +61,9 @@
 (def dbs
   ;; Build once; every test reads from the result.
   (delay
-    (let [dir (fs/create-temp-dir {:prefix "kkh-jlcpcb-test-"})
+    (let [dir     (fs/create-temp-dir {:prefix "kkh-jlcpcb-test-"})
           fixture (str (fs/path dir "fixture.sqlite3"))
-          out-db (str (fs/path dir "out.db"))]
+          out-db  (str (fs/path dir "out.db"))]
       (-> (Runtime/getRuntime)
           (.addShutdownHook (Thread. #(fs/delete-tree dir))))
       (build-fixture-db! fixture)
@@ -85,7 +85,7 @@
   (let [{:keys [lcsc category subcategory mfr manufacturer package joints description
                 datasheet library_type preferred stock present price attributes]}
         (merge row-defaults row)
-        s #(str "'" (sql-quote %) "'")]
+        s                                                                             #(str "'" (sql-quote %) "'")]
     (str "INSERT INTO jlc_components VALUES ("
          (str/join ", " [lcsc (s category) (s subcategory) (s mfr) (s manufacturer)
                          (s package) joints (s description) (s datasheet)
@@ -158,20 +158,20 @@
     (is (= (str base-url "/cache.zip") (q "SELECT value FROM meta WHERE key = 'source_url'")))))
 
 (deftest plan-summary-lines
-  (let [lines (plan-summary {:part-names ["cache.z01" "cache.zip"]
+  (let [lines (plan-summary {:part-names  ["cache.z01" "cache.zip"]
                              :total-bytes 500000000
-                             :work-dir "/scratch/x"
-                             :output "db.sqlite"
-                             :existing {:generated-at "2026-01-01T00:00:00Z" :row-count "42"}})]
+                             :work-dir    "/scratch/x"
+                             :output      "db.sqlite"
+                             :existing    {:generated-at "2026-01-01T00:00:00Z" :row-count "42"}})]
     (is (str/includes? (nth lines 1) "download 2 files, ~500 MB total"))
     (is (str/includes? (nth lines 2) "~5 GB of scratch space in /scratch/x"))
     (is (str/includes? (nth lines 3) "replace the database at db.sqlite (built 2026-01-01T00:00:00Z, 42 parts)")))
   (is (str/includes? (nth (plan-summary {:part-names ["cache.zip"] :total-bytes 1
-                                         :work-dir "w" :output "o" :existing {:generated-at nil}})
+                                         :work-dir   "w"           :output      "o" :existing {:generated-at nil}})
                           3)
                      "not a recognized parts database"))
   (is (str/includes? (nth (plan-summary {:part-names ["cache.zip"] :total-bytes 1
-                                         :work-dir "w" :output "o" :existing nil})
+                                         :work-dir   "w"           :output      "o" :existing nil})
                           3)
                      "write the finished database to o")))
 

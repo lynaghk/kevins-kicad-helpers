@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")/.."
-command -v sqlite3 >/dev/null || exit 125
-exec bb test-download-jlcpcb-parts-database.bb

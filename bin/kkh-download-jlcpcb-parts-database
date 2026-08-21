@@ -1,3 +1,1 @@
-#!/usr/bin/env bash
-# Thin wrapper; the implementation lives in download-jlcpcb-parts-database/.
-exec "$(dirname "$0")/../download-jlcpcb-parts-database/download-jlcpcb-parts-database" "$@"
+../download-jlcpcb-parts-database/download-jlcpcb-parts-database

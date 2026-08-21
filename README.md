@@ -3,14 +3,14 @@
 These are some helpers I've unashamedly vibe-coded to help streamline my KiCad workflows.
 See [my newsletter article for more details](https://kevinlynagh.com/newsletter/2026_07_kevins_kicad_helpers/).
 
-These tools work well enough for me, and I'm sharing them more as "these fell off the back of a truck, maybe you'll find them helpful" rather than as "I Want To Run an Impressive, Popular, And Important Open Source Project".
+These tools work for me, and I'm sharing them in case they're helpful to you too.
+I'm running KiCad 10 on MacOS and have LLM agents running them on KiCAD 10 in a Debian Linux sandbox too.
 
-I'm happy to discuss ideas and collaborate on PRs *with humans* in-so-much as our needs overlap.
-I'm running KiCad 10 on MacOS and the scripts seem to mostly work for KiCAD 10 on Debian Linux as well (where I have LLM agents use 'em).
+I'm happy to discuss ideas and collaborate on PRs *with humans*.
 
 In terms of structure:
 
-- `bin/` has symlinks to one-off tools, just put this on your `$PATH`.
+- `bin/` has symlinks/binstubs to one-off tools, just put this on your `$PATH`.
 - `project-tasks/` are helpers to build KiCad projects.
 - everything else is a tool-specific folder, most of which have verbose, LLM-written READMEs (I wrote 100% of *this* README, though, with my lumpy human brain.)
 
@@ -90,15 +90,20 @@ Schematic and footprint libraries are created as `0_<project-name>` with the `0_
 ### kkh-download-jlcpcb-parts-database
 
 I design all of my boards to be assembled by JLCPCB, so it's *extremely* helpful to have a low-latency way to query their parts.
-This script downloads CDFER's [daily JLCPCB parts sqlite database](https://github.com/CDFER/jlcpcb-parts-database) and consolidates everything into a single table with a numeric price column and lots of indexes so that searching is fast:
+This script downloads the [jlcparts](https://github.com/yaqwsx/jlcparts) daily JLCPCB parts sqlite database and consolidates everything into a `components` table and lots of indexes so that searching is fast.
+It also parses resistor, capacitor, and inductor values into tables with SI-base-unit REAL columns, so parametric queries like `farads = 100e-9 AND voltage_v >= 16` work with plain SQL.
 
 https://github.com/user-attachments/assets/5b1b1c08-0cfe-4aba-8c3a-ec0e257e46ca
+
+The database is written to `jlcpcb_parts.db`, or to the file you give as the first argument:
+
+    kkh-download-jlcpcb-parts-database ~/foo/bar/parts.db
 
 I use [DB Browser for SQLite](https://sqlitebrowser.org) but you can of course use whatever interface you like.
 
 It's also extremely useful to point LLM agents at this database:
 
-> My dude, I need an H-bridge that can drive +/- 30 Volts, please query ~/foo/bar/parts.db and give me a table with 5 options for integrated ones showing price / stock / description. Please also make a table showing options for drivers with external transistors. Include links to the datasheets.
+> My dude, I need an H-bridge that can drive +/- 30 Volts, please query ~/foo/bar/jlcpcb_parts.db and give me a table with 5 options for integrated drivers showing price / stock / description. Please also make a table showing options for drivers with external transistors. Include links to the datasheets.
 
 
 ### kkh-analyze-schematic
