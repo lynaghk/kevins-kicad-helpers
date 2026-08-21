@@ -9,10 +9,15 @@
   (str "Usage:\n"
        "  kkh list\n"
        "  kkh check [board]\n"
-       "  kkh build [board] [--force]"))
+       "  kkh build [board] [--force]\n"
+       "\n"
+       "Boards whose directory contains a .kkh-skip file are skipped unless named explicitly."))
+
+(defn board-line [{:keys [board-name skip?]}]
+  (str board-name (when skip? " (skipped)")))
 
 (defn available-boards [projects]
-  (str/join "\n" (map #(str "  " (:board-name %)) projects)))
+  (str/join "\n" (map #(str "  " (board-line %)) projects)))
 
 (defn fail-with-projects! [message projects]
   (shared/fail! (str message "\n\n" usage "\n\nAvailable PCBs:\n"
@@ -37,7 +42,7 @@
 
 (defn select-projects [{:keys [all? target]} projects]
   (if all?
-    projects
+    (vec (remove :skip? projects))
     [(or (some #(when (= target (:board-name %)) %) projects)
          (fail-with-projects! (str "Unknown PCB: " target) projects))]))
 
@@ -69,8 +74,8 @@
       (case command
         "list" (if (empty? args)
                  (do
-                   (doseq [{:keys [board-name]} projects]
-                     (println board-name))
+                   (doseq [project projects]
+                     (println (board-line project)))
                    0)
                  (fail-with-projects! "list does not accept arguments." projects))
         "build" (run-command! repo-dir "build" args projects)

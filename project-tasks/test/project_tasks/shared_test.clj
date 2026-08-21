@@ -70,6 +70,33 @@
       (fs/create-dirs (fs/path root "src"))
       (is (nil? (shared/find-repo-dir (fs/path root "src")))))))
 
+(defn spit-board! [board-dir project-name]
+  (fs/create-dirs board-dir)
+  (doseq [extension ["kicad_pro" "kicad_sch" "kicad_pcb"]]
+    (spit (fs/file (fs/path board-dir (str project-name "." extension))) "")))
+
+(deftest project-from-dir-marks-kkh-skip
+  (with-temp-tree
+    (fn [root]
+      (let [board (fs/path root "pcbs" "widget")]
+        (spit-board! board "widget")
+        (is (false? (:skip? (shared/project-from-dir root board))))
+        (spit (fs/file (fs/path board ".kkh-skip")) "")
+        (is (true? (:skip? (shared/project-from-dir root board))))))))
+
+(deftest discover-projects-includes-skipped-boards
+  (with-temp-tree
+    (fn [root]
+      (let [alpha (fs/path root "pcbs" "alpha")
+            beta (fs/path root "pcbs" "beta")]
+        (spit-board! alpha "alpha")
+        (spit-board! beta "beta")
+        (spit (fs/file (fs/path beta ".kkh-skip")) "")
+        (is (= [{:board-name "pcbs/alpha" :skip? false}
+                {:board-name "pcbs/beta" :skip? true}]
+               (map #(select-keys % [:board-name :skip?])
+                    (shared/discover-projects root))))))))
+
 (deftest with-text-variable-defines-variable-during-body
   (with-temp-tree
     (fn [root]

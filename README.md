@@ -55,6 +55,9 @@ This one command runs schematic DRC, PCB ERC, and custom analysis checks, then b
 (Run `kkh check` if you want everything but the build.)
 Run `kkh list` to see the repo-relative board names you can pass to `kkh build <board>` or `kkh check <board>`.
 
+To retire a board without deleting it (e.g. an obsolete revision you want to keep browsable), create an empty `.kkh-skip` file in its directory.
+Argless `kkh build` and `kkh check` then leave that board alone, `kkh list` shows it as `(skipped)`, and naming it explicitly still builds it.
+
 The build script also exposes the version string as a KiCad variable, so add `${KKH_VERSION_DATE}` to your PCB silkscreen to get the version in the output Gerber files.
 
 

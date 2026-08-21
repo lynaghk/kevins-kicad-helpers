@@ -121,6 +121,7 @@
        (when-not (fs/regular-file? pcb)
          (fail! (str "Could not find matching PCB: " pcb)))
        {:board-name (board-name repo-dir board-dir project-name)
+        :skip? (fs/regular-file? (fs/path board-dir ".kkh-skip"))
         :project-dir board-dir
         :project-file project-file
         :project-name project-name
