@@ -40,9 +40,12 @@
    {:lcsc       1010                                                            :category "Inductors (SMD)"
     :attributes {"Inductance"         "10uH" "Tolerance" "±20%" "Current Rating" "1.2A"
                  "DC Resistance(DCR)" "52mΩ"}}
-   ;; Excluded: out of stock / not present.
+   ;; Excluded: long out of stock / not present.
    {:lcsc 1011 :category "Resistors" :stock 0 :attributes {"Resistance" "1kΩ"}}
    {:lcsc 1012 :category "Resistors" :present 0 :attributes {"Resistance" "1kΩ"}}
+   ;; Kept despite zero stock: last on stock within a year of generated-at (2025-10-15).
+   {:lcsc 1015 :category "Sensors" :subcategory "Pressure Sensors" :stock 0
+    :last_on_stock 1760486400 :price "1-9:2.6952,10-29:2.4772"}
    ;; Preferred counts as non-extended; malformed price becomes NULL.
    {:lcsc 1013 :category "Connectors" :preferred 1 :price "garbage"}
    ;; Upstream writes "8MΩ" on power-inductor DCR where it means mΩ.
@@ -52,7 +55,7 @@
 (def row-defaults
   {:category ""  :subcategory "" :mfr       "MFR-X" :manufacturer "Maker"  :package   "0402"
    :joints   2   :description "" :datasheet ""      :library_type "expand" :preferred 0
-   :stock    100 :present     1  :price     ""})
+   :stock    100 :present     1  :price     ""      :last_on_stock 0})
 
 (declare insert-sql q build-fixture-db!)
 
@@ -76,20 +79,20 @@
                  "lcsc INTEGER PRIMARY KEY, category TEXT, subcategory TEXT, "
                  "mfr TEXT, manufacturer TEXT, package TEXT, joints INTEGER, "
                  "description TEXT, datasheet TEXT, library_type TEXT, preferred INTEGER, "
-                 "stock INTEGER, present INTEGER, price TEXT, attributes TEXT);\n"
+                 "stock INTEGER, present INTEGER, last_on_stock INTEGER, price TEXT, attributes TEXT);\n"
                  "CREATE TABLE lcsc_components (lcsc INTEGER PRIMARY KEY);\n")]
     (p/shell {:in (str ddl (str/join "\n" (map insert-sql fixture-rows)))}
              "sqlite3" fixture)))
 
 (defn insert-sql [row]
   (let [{:keys [lcsc category subcategory mfr manufacturer package joints description
-                datasheet library_type preferred stock present price attributes]}
+                datasheet library_type preferred stock present last_on_stock price attributes]}
         (merge row-defaults row)
         s                                                                             #(str "'" (sql-quote %) "'")]
     (str "INSERT INTO jlc_components VALUES ("
          (str/join ", " [lcsc (s category) (s subcategory) (s mfr) (s manufacturer)
                          (s package) joints (s description) (s datasheet)
-                         (s library_type) preferred stock present (s price)
+                         (s library_type) preferred stock present last_on_stock (s price)
                          (s (json/generate-string attributes))])
          ");")))
 
@@ -101,8 +104,12 @@
 
 (deftest components-table
   (testing "row filtering"
-    (is (= "12" (q "SELECT COUNT(*) FROM components")))
+    (is (= "13" (q "SELECT COUNT(*) FROM components")))
     (is (= "0" (q "SELECT COUNT(*) FROM components WHERE lcsc IN (1011, 1012)"))))
+  (testing "recently stocked zero-stock parts stay, with last_on_stock as an ISO date"
+    (is (= "2025-10-15" (q "SELECT last_on_stock FROM components WHERE lcsc = 1015")))
+    (is (= "1" (q "SELECT price = 2.695 FROM components WHERE lcsc = 1015")))
+    (is (= "1" (q "SELECT last_on_stock IS NULL FROM components WHERE lcsc = 1001"))))
   (testing "extended flag"
     (is (= "0" (q "SELECT extended FROM components WHERE lcsc = 1001")))
     (is (= "1" (q "SELECT extended FROM components WHERE lcsc = 1002")))
@@ -154,7 +161,7 @@
     (is (= "10" (q "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'"))))
   (testing "meta table records provenance"
     (is (= generated-at (q "SELECT value FROM meta WHERE key = 'generated_at'")))
-    (is (= "12" (q "SELECT value FROM meta WHERE key = 'row_count'")))
+    (is (= "13" (q "SELECT value FROM meta WHERE key = 'row_count'")))
     (is (= (str base-url "/cache.zip") (q "SELECT value FROM meta WHERE key = 'source_url'")))))
 
 (deftest plan-summary-lines

@@ -99,37 +99,43 @@
   "The whole transform as one SQL string for the sqlite3 CLI on stdin."
   [{:keys [new-file generated-at]}]
   (str "ATTACH DATABASE '" (sql-quote (str new-file)) "' AS out;\n\n"
-       components-sql
+       (components-sql generated-at)
        "\n"
        (str/join "\n\n" (mapcat side-table-sql (family-specs)))
        "\n\n"
        (meta-sql generated-at)
        "\n\nANALYZE out;\n"))
 
-(def components-sql "
+(defn components-sql [generated-at]
+  (str "
 -- Explicit column types so consumers get a real REAL price column (and typed
 -- integer columns) — no CAST(price AS REAL) needed at query time.
 CREATE TABLE out.components (
-    lcsc         INTEGER PRIMARY KEY,
-    extended     INTEGER,   -- 0 = basic/preferred (fee-free), 1 = extended
-    stock        INTEGER,
-    price        REAL,      -- USD, first (smallest-qty / highest) tier; NULL if unknown
-    mfr          TEXT,      -- manufacturer PART NUMBER (MPN), not the maker's name
-    manufacturer TEXT,      -- manufacturer NAME, e.g. 'Texas Instruments'
-    category     TEXT,      -- can be '' (blank upstream) for ~18% of parts
-    subcategory  TEXT,
-    package      TEXT,
-    joints       INTEGER,
-    description  TEXT,
-    datasheet    TEXT,
-    attributes   TEXT       -- JLCPCB structured specs as a JSON object of
-                            -- canonicalized strings, e.g. {\"Resistance\":\"10kΩ\",
-                            -- \"Tolerance\":\"±1%\"}; query with json_extract().
-                            -- NULL when upstream has none (~6% of parts).
+    lcsc          INTEGER PRIMARY KEY,
+    mpn           TEXT,      -- manufacturer part number, e.g. 'STM32F103C8T6'
+    extended      INTEGER,   -- 0 = basic/preferred (fee-free), 1 = extended
+    stock         INTEGER,
+    price         REAL,      -- USD, first (smallest-qty / highest) tier; NULL if unknown
+    category      TEXT,      -- can be '' (blank upstream) for ~18% of parts
+    subcategory   TEXT,
+    package       TEXT,
+    joints        INTEGER,
+    description   TEXT,
+    datasheet     TEXT,
+    manufacturer  TEXT,      -- manufacturer NAME, e.g. 'Texas Instruments'
+    last_on_stock TEXT,      -- ISO date stock was last nonzero; NULL for parts in
+                             -- stock now. Set only on the kept zero-stock parts,
+                             -- which are usually still orderable as JLCPCB
+                             -- \"Global Sourcing\" preorders.
+    attributes    TEXT       -- JLCPCB structured specs as a JSON object of
+                             -- canonicalized strings, e.g. {\"Resistance\":\"10kΩ\",
+                             -- \"Tolerance\":\"±1%\"}; query with json_extract().
+                             -- NULL when upstream has none (~6% of parts).
 );
 
 INSERT INTO out.components
 SELECT lcsc,
+       mfr AS mpn,
        -- 1 = extended part (incurs per-BOM-line feeding fee at assembly);
        -- 0 = basic/preferred, i.e. effectively fee-free. JLCPCB's basic and
        -- preferred tiers are functionally the same for our purposes, so we
@@ -145,20 +151,25 @@ SELECT lcsc,
        CASE WHEN first_tier LIKE '%:%'
             THEN ROUND(CAST(substr(first_tier, instr(first_tier, ':') + 1) AS REAL), 3)
             ELSE NULL END AS price,
-       mfr, manufacturer, category, subcategory, package, joints,
-       description, datasheet,
+       category, subcategory, package, joints, description, datasheet, manufacturer,
+       CASE WHEN stock = 0 THEN date(last_on_stock, 'unixepoch') END AS last_on_stock,
        -- Empty attribute objects become NULL so absence is queryable
        -- (attributes IS NULL) and costs no storage.
        NULLIF(NULLIF(attributes, ''), '{}')
 FROM (
-    SELECT lcsc, library_type, preferred, stock, mfr, manufacturer, category,
-           subcategory, package, joints, description, datasheet, attributes,
+    SELECT lcsc, library_type, preferred, stock, last_on_stock, mfr, manufacturer,
+           category, subcategory, package, joints, description, datasheet, attributes,
            CASE WHEN instr(price, ',') > 0
                 THEN substr(price, 1, instr(price, ',') - 1)
                 ELSE price END AS first_tier
     FROM jlc_components
-    -- Only parts that are currently in the JLCPCB catalog and in stock.
-    WHERE present = 1 AND stock > 0
+    -- Parts currently in the JLCPCB catalog that are in stock now, or were in
+    -- stock within the year before this build. The upstream stock figure is
+    -- JLCPCB's own SMT warehouse; recently-stocked parts still carry prices and
+    -- are usually preorderable via Global Sourcing, so they stay queryable here.
+    WHERE present = 1
+      AND (stock > 0
+           OR last_on_stock > CAST(strftime('%s', '" (sql-quote generated-at) "', '-365 days') AS INTEGER))
 );
 
 -- Indexes for the columns you actually filter / sort on.
@@ -167,7 +178,7 @@ CREATE INDEX out.idx_cs_price    ON components (price);
 CREATE INDEX out.idx_cs_stock    ON components (stock);
 CREATE INDEX out.idx_cs_extended ON components (extended);
 CREATE INDEX out.idx_cs_package  ON components (package);
-CREATE INDEX out.idx_cs_mfr      ON components (mfr);
+CREATE INDEX out.idx_cs_mpn      ON components (mpn);
 CREATE INDEX out.idx_cs_manufacturer ON components (manufacturer);
 
 -- Normalized numeric spec tables for the passive families, so parametric
@@ -185,7 +196,7 @@ CREATE INDEX out.idx_cs_manufacturer ON components (manufacturer);
 -- they were written in: upstream has both \"100nF\" and \"100000pF\", and
 -- 100*1e-9 != 100000*1e-12 in floating point, but both canonicalize to
 -- the same double as the query literal 100e-9 — so plain = works.
-")
+"))
 
 (defn meta-sql [generated-at]
   (str "-- Build provenance: durable, travels with the DB.\n"
