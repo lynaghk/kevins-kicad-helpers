@@ -14,6 +14,11 @@ SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 KKH_REPO=$(realpath "$SCRIPT_DIR/..")
 export KKH_REPO
 
+if [[ "${1:-}" == "macos-opener" ]]; then
+    shift
+    exec "$KKH_REPO/macos-opener/bin/macos-opener" "$@"
+fi
+
 if ! command -v mise >/dev/null 2>&1; then
     echo "Error: kkh needs 'mise' on PATH (https://mise.jdx.dev) to provide its pinned tools." >&2
     exit 1

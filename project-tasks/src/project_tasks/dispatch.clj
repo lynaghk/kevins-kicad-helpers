@@ -10,6 +10,7 @@
        "  kkh list\n"
        "  kkh check [board]\n"
        "  kkh build [board] [--force]\n"
+       "  kkh macos-opener install | status | uninstall\n"
        "\n"
        "Boards whose directory contains a .kkh-skip file are skipped unless named explicitly."))
 

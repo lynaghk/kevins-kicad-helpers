@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+KKH_MACOS_OPENER_TEMPORARY_DIR=
+
+main() {
+    case "${1:-}" in
+        install)
+            require_no_extra_arguments "$@"
+            require_macos
+            install_opener
+            ;;
+        status)
+            require_no_extra_arguments "$@"
+            require_macos
+            show_status
+            ;;
+        uninstall)
+            require_no_extra_arguments "$@"
+            require_macos
+            uninstall_opener
+            ;;
+        help|-h|--help)
+            usage
+            ;;
+        "")
+            usage >&2
+            exit 1
+            ;;
+        *)
+            echo "Unknown macos-opener command: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+}
+
+usage() {
+    echo "Usage: kkh macos-opener install | status | uninstall"
+}
+
+require_macos() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        echo "kkh macos-opener only supports macOS." >&2
+        exit 1
+    fi
+}
+
+require_no_extra_arguments() {
+    if (( $# != 1 )); then
+        usage >&2
+        exit 1
+    fi
+}
+
+install_opener() {
+    local kicad_app
+    local opener_app
+    local source_file
+    local temporary_dir
+    local staged_app
+
+    kicad_app=$(kicad_app_path)
+    opener_app=$(opener_app_path)
+    source_file=$(resource_path "kicad-new-instance.applescript")
+
+    require_directory "$kicad_app" "Could not find KiCad at $kicad_app."
+    mkdir -p "$(dirname "$opener_app")"
+    temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/kkh-macos-opener.XXXXXX")
+    KKH_MACOS_OPENER_TEMPORARY_DIR=$temporary_dir
+    trap remove_temporary_dir EXIT
+    staged_app="$temporary_dir/KiCad New Instance.app"
+
+    run_quietly /usr/bin/osacompile -o "$staged_app" "$source_file"
+    configure_bundle "$staged_app"
+    run_quietly /usr/bin/codesign --force --sign - "$staged_app"
+
+    remove_opener "$opener_app"
+    /bin/mv "$staged_app" "$opener_app"
+    register_application "$opener_app"
+    set_default_handler "$opener_app"
+
+    echo "Installed $opener_app."
+    report_default_handler "$opener_app"
+    print_install_instructions
+}
+
+run_quietly() {
+    local output
+
+    if ! output=$("$@" 2>&1); then
+        printf '%s\n' "$output" >&2
+        return 1
+    fi
+}
+
+print_install_instructions() {
+    echo
+    echo "Double-click a .kicad_pro file in Finder to open it in a new KiCad instance."
+    echo "Run 'kkh macos-opener status' to check the file association."
+    echo "Run 'kkh macos-opener uninstall' to restore KiCad's default behavior."
+}
+
+remove_temporary_dir() {
+    if [[ -n "$KKH_MACOS_OPENER_TEMPORARY_DIR" && -d "$KKH_MACOS_OPENER_TEMPORARY_DIR" ]]; then
+        rm -rf -- "$KKH_MACOS_OPENER_TEMPORARY_DIR"
+    fi
+}
+
+show_status() {
+    local opener_app
+    local actual
+
+    opener_app=$(opener_app_path)
+    if [[ -d "$opener_app" ]]; then
+        echo "Installed: $opener_app"
+    else
+        echo "Not installed: $opener_app"
+    fi
+
+    actual=$(default_handler)
+    echo "Default .kicad_pro application: $actual"
+
+    if [[ ! -d "$opener_app" || "$actual" != "$opener_app" ]]; then
+        return 1
+    fi
+}
+
+uninstall_opener() {
+    local kicad_app
+    local opener_app
+
+    kicad_app=$(kicad_app_path)
+    opener_app=$(opener_app_path)
+    require_directory "$kicad_app" "Could not restore KiCad because $kicad_app does not exist."
+
+    set_default_handler "$kicad_app"
+    unregister_application "$opener_app"
+    remove_opener "$opener_app"
+
+    echo "Removed $opener_app."
+    report_default_handler "$kicad_app"
+}
+
+kicad_app_path() {
+    echo "/Applications/KiCad/KiCad.app"
+}
+
+opener_app_path() {
+    echo "$HOME/Applications/KiCad New Instance.app"
+}
+
+resource_path() {
+    local script_dir
+
+    script_dir=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+    echo "$(realpath "$script_dir/..")/resources/$1"
+}
+
+require_directory() {
+    local path=$1
+    local message=$2
+
+    if [[ ! -d "$path" ]]; then
+        echo "$message" >&2
+        exit 1
+    fi
+}
+
+configure_bundle() {
+    local app=$1
+    local plist="$app/Contents/Info.plist"
+    local plist_buddy=/usr/libexec/PlistBuddy
+
+    replace_plist_string "$plist" CFBundleIdentifier com.kevinlynagh.kkh.kicad-new-instance
+    replace_plist_string "$plist" CFBundleName "KiCad New Instance"
+    "$plist_buddy" -c "Delete :CFBundleDocumentTypes" "$plist" >/dev/null 2>&1 || true
+    "$plist_buddy" -c "Add :CFBundleDocumentTypes array" "$plist"
+    "$plist_buddy" -c "Add :CFBundleDocumentTypes:0 dict" "$plist"
+    "$plist_buddy" -c "Add :CFBundleDocumentTypes:0:CFBundleTypeName string 'KiCad project file'" "$plist"
+    "$plist_buddy" -c "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Editor" "$plist"
+    "$plist_buddy" -c "Add :CFBundleDocumentTypes:0:LSHandlerRank string Owner" "$plist"
+    "$plist_buddy" -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions array" "$plist"
+    "$plist_buddy" -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0 string kicad_pro" "$plist"
+}
+
+replace_plist_string() {
+    local plist=$1
+    local key=$2
+    local value=$3
+    local plist_buddy=/usr/libexec/PlistBuddy
+
+    "$plist_buddy" -c "Delete :$key" "$plist" >/dev/null 2>&1 || true
+    "$plist_buddy" -c "Add :$key string '$value'" "$plist"
+}
+
+register_application() {
+    launch_services -f "$1"
+}
+
+unregister_application() {
+    if [[ -d "$1" ]]; then
+        launch_services -u "$1"
+    fi
+}
+
+launch_services() {
+    local executable=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
+    "$executable" "$@"
+}
+
+set_default_handler() {
+    /usr/bin/osascript "$(resource_path "default-handler.applescript")" set "$1"
+}
+
+default_handler() {
+    /usr/bin/osascript "$(resource_path "default-handler.applescript")" get
+}
+
+report_default_handler() {
+    local expected=$1
+    local actual
+
+    actual=$(default_handler)
+    echo "Default .kicad_pro application: $actual"
+
+    if [[ "$actual" != "$expected" ]]; then
+        echo "macOS did not select the expected application." >&2
+        echo "Select a .kicad_pro file in Finder, open Get Info, and change Open with to $(basename "$expected")." >&2
+        return 1
+    fi
+}
+
+remove_opener() {
+    local opener_app=$1
+    local expected
+
+    expected=$(opener_app_path)
+    if [[ "$opener_app" != "$expected" ]]; then
+        echo "Refusing to remove unexpected path: $opener_app" >&2
+        exit 1
+    fi
+
+    if [[ -e "$opener_app" ]]; then
+        rm -rf -- "$opener_app"
+    fi
+}
+
+main "$@"
