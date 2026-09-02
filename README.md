@@ -61,6 +61,13 @@ Argless `kkh build` and `kkh check` then leave that board alone, `kkh list` show
 The build script also exposes the version string as a KiCad variable, so add `${KKH_VERSION_DATE}` to your PCB silkscreen to get the version in the output Gerber files.
 
 
+### kkh macos-opener
+
+MacOS makes it hard to open multiple instances of the same application, which makes it difficult to compare multiple KiCad projects and copy schematics/layout between them.
+Run `kkh macos-opener install` to create `/Applications/KiCad New Instance.app` and set it as the default application for `.kicad_pro` files, so you can easily open as many KiCad project instances as you want.
+Run `kkh macos-opener uninstall` to set the default program back to `KiCad.app`.
+
+
 ### kkh-dxf-import
 
 I specify all of my mechanical stuff --- board outlines, mounting hole positions, etc. --- in Autodesk Inventor since it has a constraint solver and allows me to directly reference complex geometry driven by other objects.
