@@ -543,7 +543,30 @@ def connect_board():
     """
     from kipy import KiCad
 
-    return KiCad().get_board()
+    kicad = KiCad()
+    try:
+        return kicad.get_board()
+    except Exception:
+        # get_board opens the socket (to list documents) before it can fail with
+        # "no board open"; release that descriptor so retries don't accumulate.
+        _close_socket(kicad._client)
+        raise
+
+
+def _close_socket(client) -> None:
+    try:
+        client._conn.close()
+    except Exception:  # noqa: BLE001 - the socket may never have opened
+        pass
+
+
+def close_board(board) -> None:
+    """Close the IPC socket behind ``board``, ignoring any error.
+
+    Each connection holds several OS file descriptors, so a long-running watch
+    must release the old socket before opening a new one.
+    """
+    _close_socket(board.client)
 
 
 def sync_one(dxf_path: Path, board, args, id_override=None, layer_override=None) -> dict:
@@ -673,20 +696,22 @@ def run_watch(args) -> int:
     print(f"Watching {watch_dir}/ for DXF changes — Ctrl-C to stop.")
     state: dict = {}  # Path -> (mtime_ns, size) of what we last imported
     waiting = False  # whether we've already printed "waiting for KiCad"
+    board = None  # reused across polls; each connection holds scarce file descriptors
 
     try:
         while True:
-            try:
-                board = connect_board()
-            except (KiCadConnectionError, ApiError) as e:
-                if not waiting:
-                    print(f"waiting for KiCad... [{e}]\n  ({_CONNECT_HELP})")
-                    waiting = True
-                time.sleep(args.interval)
-                continue
-            if waiting:
-                print("connected to KiCad board.")
-                waiting = False
+            if board is None:
+                try:
+                    board = connect_board()
+                except (KiCadConnectionError, ApiError) as e:
+                    if not waiting:
+                        print(f"waiting for KiCad... [{e}]\n  ({_CONNECT_HELP})")
+                        waiting = True
+                    time.sleep(args.interval)
+                    continue
+                if waiting:
+                    print("connected to KiCad board.")
+                    waiting = False
 
             seen = set()
             for f in sorted(watch_dir.glob("*.dxf")):
@@ -703,6 +728,9 @@ def run_watch(args) -> int:
                     r = sync_one(f, args=args, board=board)
                 except (KiCadConnectionError, ApiError) as e:
                     print(f"  lost KiCad connection ({e}); will retry")
+                    close_board(board)
+                    board = None
+                    waiting = False
                     break  # reconnect on the next cycle
                 except ValueError as e:
                     print(f"  skip {f.name}: {e}")
