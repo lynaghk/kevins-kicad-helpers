@@ -13,9 +13,9 @@
   (let [ran (atom [])]
     (is (= {:ok? false
             :checks [{:label "a" :ok? true}
-                     {:label "b" :ok? false :detail "boom" :report "/r.rpt"}]}
+                     {:label "b" :ok? false :detail "boom" :report "/r.txt"}]}
            (check/run-stages
             [{:label "a" :run! #(swap! ran conj "a")}
-             {:label "b" :run! #(shared/fail! "boom" {:report "/r.rpt"})}
+             {:label "b" :run! #(shared/fail! "boom" {:report "/r.txt"})}
              {:label "c" :run! #(swap! ran conj "c")}])))
     (is (= ["a"] @ran))))

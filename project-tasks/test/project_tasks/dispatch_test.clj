@@ -17,13 +17,13 @@
   (is (= ["pcbs/pump"
           "  ✓ analysis"
           "  ✓ ERC"
-          "  ✗ DRC  outputs/v1/reports/pump-drc.rpt"]
+          "  ✗ DRC  outputs/v1/reports/pump-drc.txt"]
          (dispatch/check-result-lines
           "pcbs/pump"
           {:ok? false :checks [{:label "analysis" :ok? true}
                                {:label "ERC" :ok? true}
                                {:label "DRC" :ok? false
-                                :detail "outputs/v1/reports/pump-drc.rpt"}]}))))
+                                :detail "outputs/v1/reports/pump-drc.txt"}]}))))
 
 (deftest check-result-lines-indent-multi-line-detail
   (is (= ["pcbs/pump"

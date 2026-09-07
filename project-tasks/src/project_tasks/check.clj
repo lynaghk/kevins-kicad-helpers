@@ -40,7 +40,7 @@
 
       {:label "ERC"
        :run! (fn []
-               (let [report (fs/path reports (str project-name "-erc.rpt"))]
+               (let [report (fs/path reports (str project-name "-erc.txt"))]
                  (kicad-check!
                   project-dir
                   report
@@ -53,7 +53,7 @@
       ;; geometry of the text that will actually be plotted.
       {:label "DRC"
        :run! (fn []
-               (let [report (fs/path reports (str project-name "-drc.rpt"))]
+               (let [report (fs/path reports (str project-name "-drc.txt"))]
                  (kicad-check!
                   project-dir
                   report

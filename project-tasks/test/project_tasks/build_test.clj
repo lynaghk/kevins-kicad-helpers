@@ -82,7 +82,7 @@
 (deftest kicad-check-failure-message-previews-report
   (with-temp-tree
     (fn [root]
-      (let [report (fs/path root "outputs" "2026-07-16-b59296" "reports" "piezo_driver-erc.rpt")
+      (let [report (fs/path root "outputs" "2026-07-16-b59296" "reports" "piezo_driver-erc.txt")
             project {:board-name "pcbs/piezo_driver"}]
         (fs/create-dirs (fs/parent report))
         (spit (fs/file report)
@@ -105,7 +105,7 @@
         (is (= (str "Could not build pcbs/piezo_driver because ERC failed.\n"
                     "\n"
                     "First errors from:\n"
-                    "  outputs/2026-07-16-b59296/reports/piezo_driver-erc.rpt\n"
+                    "  outputs/2026-07-16-b59296/reports/piezo_driver-erc.txt\n"
                     "  ERC messages: 26  Errors 0  Warnings 26\n"
                     "\n"
                     "  1. Symbol '1206,10uF' doesn't match copy in library 'PCM_JLCPCB-Capacitors'\n"
@@ -119,12 +119,12 @@
 (deftest kicad-check-failure-message-handles-missing-report
   (with-temp-tree
     (fn [root]
-      (let [report (fs/path root "outputs" "2026-07-16-b59296" "reports" "piezo_driver-drc.rpt")
+      (let [report (fs/path root "outputs" "2026-07-16-b59296" "reports" "piezo_driver-drc.txt")
             project {:board-name "pcbs/piezo_driver"}]
         (is (= (str "Could not build pcbs/piezo_driver because DRC failed.\n"
                     "\n"
                     "First errors from:\n"
-                    "  outputs/2026-07-16-b59296/reports/piezo_driver-drc.rpt\n"
+                    "  outputs/2026-07-16-b59296/reports/piezo_driver-drc.txt\n"
                     "\n"
                     "  Report could not be previewed.\n"
                     "\n"
