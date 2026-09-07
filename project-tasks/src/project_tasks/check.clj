@@ -6,24 +6,14 @@
             [project-tasks.schematic :as schematic]
             [project-tasks.shared :as shared]))
 
-(defn kicad-check-failure [check-label report]
-  {:kkh/error :kicad-check-failure
-   :check-label check-label
-   :report report})
+(declare run-stages kicad-check!)
 
-(defn check-failed-message [check-label report cwd]
-  (str check-label " failed. Report: " (shared/path-for-message cwd report)))
-
-(defn- kicad-check! [project-dir check-label report args]
-  (let [{:keys [exit]} @(p/process (into ["kicad-cli"] args)
-                                   {:dir (str project-dir)
-                                    :out :string
-                                    :err :string})]
-    (when-not (zero? exit)
-      (shared/fail! (check-failed-message check-label report (fs/cwd))
-                    (kicad-check-failure check-label report)))))
-
-(defn run! [repo-dir {:keys [project-dir project-file project-name schematic pcb]}]
+(defn run!
+  "Run every check for the project and stop at the first failure.
+  Returns {:ok? bool :checks [{:label :ok? :detail :report}]} where :detail is
+  a display string for a failed check and :report the absolute report path of
+  a failed kicad check."
+  [repo-dir {:keys [project-dir project-file project-name schematic pcb]}]
   (let [version (shared/build-version repo-dir)
         reports (fs/path project-dir "outputs" version "reports")]
 
@@ -33,41 +23,70 @@
     ;; ${KKH_VERSION_DATE}; meant to be committed alongside the board.
     (shared/ensure-text-variable! project-file "KKH_VERSION_DATE" "0000-00-00-unbuilt")
 
-    (let [components (schematic/load-components project-dir schematic)
-          findings (analysis/run-checks {:project-dir project-dir
-                                         :project-name project-name
-                                         :schematic schematic
-                                         :pcb pcb
-                                         :components components})]
-      (when (seq findings)
-        (shared/fail!
-         (str "Custom PCB checks failed:\n"
-              (analysis/format-findings findings)))))
+    (run-stages
+     [{:label "analysis"
+       :run! (fn []
+               (let [components (schematic/load-components project-dir schematic)
+                     findings (analysis/run-checks {:project-dir project-dir
+                                                    :project-name project-name
+                                                    :schematic schematic
+                                                    :pcb pcb
+                                                    :components components})]
+                 (when (seq findings)
+                   (shared/fail! (analysis/format-findings findings)))))}
 
-    (shared/shell!
-     project-dir
-     ["kkh-analyze-schematic" (str schematic)])
+      {:label "schematic"
+       :run! #(shared/shell! project-dir ["kkh-analyze-schematic" (str schematic)])}
 
-    (let [report (fs/path reports (str project-name "-erc.rpt"))]
-      (kicad-check!
-       project-dir
-       "ERC"
-       report
-       ["sch" "erc"
-        "--exit-code-violations"
-        "-o" (str report)
-        (str schematic)]))
+      {:label "ERC"
+       :run! (fn []
+               (let [report (fs/path reports (str project-name "-erc.rpt"))]
+                 (kicad-check!
+                  project-dir
+                  report
+                  ["sch" "erc"
+                   "--exit-code-violations"
+                   "-o" (str report)
+                   (str schematic)])))}
 
-    ;; The real version, not the placeholder, so DRC checks the rendered
-    ;; geometry of the text that will actually be plotted.
-    (let [report (fs/path reports (str project-name "-drc.rpt"))]
-      (kicad-check!
-       project-dir
-       "DRC"
-       report
-       ["pcb" "drc"
-        "--schematic-parity"
-        "--exit-code-violations"
-        "-D" (str "KKH_VERSION_DATE=" version)
-        "-o" (str report)
-        (str pcb)]))))
+      ;; The real version, not the placeholder, so DRC checks the rendered
+      ;; geometry of the text that will actually be plotted.
+      {:label "DRC"
+       :run! (fn []
+               (let [report (fs/path reports (str project-name "-drc.rpt"))]
+                 (kicad-check!
+                  project-dir
+                  report
+                  ["pcb" "drc"
+                   "--schematic-parity"
+                   "--exit-code-violations"
+                   "-D" (str "KKH_VERSION_DATE=" version)
+                   "-o" (str report)
+                   (str pcb)])))}])))
+
+(defn- run-stage [{:keys [label run!]}]
+  (try
+    (run!)
+    {:label label :ok? true}
+    (catch Exception error
+      (merge {:label label :ok? false :detail (.getMessage error)}
+             (select-keys (ex-data error) [:report])))))
+
+(defn run-stages [stages]
+  (loop [stages stages
+         results []]
+    (if-let [stage (first stages)]
+      (let [result (run-stage stage)]
+        (if (:ok? result)
+          (recur (rest stages) (conj results result))
+          {:ok? false :checks (conj results result)}))
+      {:ok? true :checks results})))
+
+(defn- kicad-check! [project-dir report args]
+  (let [{:keys [exit]} @(p/process (into ["kicad-cli"] args)
+                                   {:dir (str project-dir)
+                                    :out :string
+                                    :err :string})]
+    (when-not (zero? exit)
+      (shared/fail! (shared/path-for-message (fs/cwd) report)
+                    {:report (str report)}))))

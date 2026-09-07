@@ -56,10 +56,10 @@
                      (take 3)
                      seq)})))
 
-(defn format-check-failure [repo-dir {:keys [board-name]} check-failure]
-  (let [{:keys [check-label report]} check-failure
+(defn format-check-failure [repo-dir {:keys [board-name]} failed-check]
+  (let [{:keys [label report]} failed-check
         {:keys [summary preview]} (report-details report)]
-    (str "Could not build " board-name " because " check-label " failed.\n"
+    (str "Could not build " board-name " because " label " failed.\n"
          "\n"
          "First errors from:\n"
          "  " (shared/path-for-message repo-dir report) "\n"
@@ -75,16 +75,16 @@
 
 (defn run! [repo-dir {:keys [project-dir project-file project-name schematic pcb] :as project} force?]
   (when-not force?
-    (try
-      (check/run! repo-dir project)
-      (catch Exception error
-        (if (= :kicad-check-failure (:kkh/error (ex-data error)))
-          (shared/fail! (format-check-failure repo-dir project (ex-data error))
+    (let [{:keys [ok? checks]} (check/run! repo-dir project)
+          failed-check (last checks)]
+      (when-not ok?
+        (if (:report failed-check)
+          (shared/fail! (format-check-failure repo-dir project failed-check)
                         {:kkh/complete-message? true})
           (shared/fail! (str "Could not build " (:board-name project)
-                             " because PCB checks failed.\n"
+                             " because the " (:label failed-check) " check failed.\n"
                              "\n"
-                             (.getMessage error)
+                             (:detail failed-check)
                              "\n"
                              "\n"
                              "Fix the reported issues, or rerun with --force.")

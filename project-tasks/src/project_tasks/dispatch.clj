@@ -54,17 +54,43 @@
     [(or (some #(when (= target (:board-name %)) %) projects)
          (fail-with-projects! (str "Unknown PCB: " target) projects))]))
 
+(defn check-result-lines
+  "Board block for the check output: a passing board collapses to one line;
+  a failing board lists each check that ran with its status and detail."
+  [board-name {:keys [ok? checks]}]
+  (if ok?
+    [(str "✓ " board-name)]
+    (into [board-name]
+          (mapcat (fn [{:keys [label ok? detail]}]
+                    (cond
+                      ok?
+                      [(str "  ✓ " label)]
+
+                      (and detail (str/includes? detail "\n"))
+                      (into [(str "  ✗ " label)]
+                            (map #(str "      " %) (str/split-lines detail)))
+
+                      :else
+                      [(str "  ✗ " label (when detail (str "  " detail)))]))
+                  checks))))
+
 (defn run-project! [repo-dir action force? project]
-  (println (str "\nPCB " (:board-name project) ": " action))
   (try
     (case action
-      "build" (build/run! repo-dir project force?)
-      "check" (check/run! repo-dir project))
-    {:board-name (:board-name project)
-     :success? true}
+      "check" (let [result (check/run! repo-dir project)]
+                (println)
+                (doseq [line (check-result-lines (:board-name project) result)]
+                  (println line))
+                {:board-name (:board-name project)
+                 :success? (:ok? result)})
+      "build" (do
+                (println (str "\n" (:board-name project) " build"))
+                (build/run! repo-dir project force?)
+                {:board-name (:board-name project)
+                 :success? true}))
     (catch Exception error
       (when-not (:kkh/complete-message? (ex-data error))
-        (println (str "PCB " (:board-name project) " " action " failed:")))
+        (println (str (:board-name project) " " action " failed:")))
       (println (.getMessage error))
       {:board-name (:board-name project)
        :success? false})))

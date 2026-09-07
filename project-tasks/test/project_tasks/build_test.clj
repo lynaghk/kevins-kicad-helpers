@@ -2,8 +2,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [project-tasks.build :as build]
-            [project-tasks.check :as check]))
+            [project-tasks.build :as build]))
 
 (defn with-temp-tree [f]
   (let [root (fs/create-temp-dir)]
@@ -115,7 +114,7 @@
                     "\n"
                     "Fix these issues, inspect the report for the complete list, or rerun with --force.")
                (build/format-check-failure root project
-                                           (check/kicad-check-failure "ERC" report))))))))
+                                           {:label "ERC" :report report})))))))
 
 (deftest kicad-check-failure-message-handles-missing-report
   (with-temp-tree
@@ -131,4 +130,4 @@
                     "\n"
                     "Fix these issues, inspect the report for the complete list, or rerun with --force.")
                (build/format-check-failure root project
-                                           (check/kicad-check-failure "DRC" report))))))))
+                                           {:label "DRC" :report report})))))))
