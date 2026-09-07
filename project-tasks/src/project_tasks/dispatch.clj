@@ -1,6 +1,7 @@
 (ns project-tasks.dispatch
   (:refer-clojure :exclude [run!])
-  (:require [clojure.string :as str]
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [project-tasks.build :as build]
             [project-tasks.check :as check]
             [project-tasks.shared :as shared]))
@@ -12,7 +13,8 @@
        "  kkh build [board] [--force]\n"
        "  kkh macos-opener install | status | uninstall\n"
        "\n"
-       "Boards whose directory contains a .kkh-skip file are skipped unless named explicitly."))
+       "check and build run every board unless one is named or the current directory is inside a board's folder.\n"
+       "Boards whose directory contains a .kkh-skip file are skipped unless named explicitly or run from their folder."))
 
 (defn board-line [{:keys [board-name skip?]}]
   (str board-name (when skip? " (skipped)")))
@@ -24,7 +26,7 @@
   (shared/fail! (str message "\n\n" usage "\n\nAvailable PCBs:\n"
                      (available-boards projects))))
 
-(defn parse-action [action args projects]
+(defn parse-action [action args projects cwd]
   (let [force-count (count (filter #{"--force"} args))
         force? (pos? force-count)
         targets (remove #{"--force"} args)]
@@ -37,9 +39,14 @@
     (let [target (first targets)]
       (when (and target (str/starts-with? target "--"))
         (fail-with-projects! (str "Unknown argument: " target) projects))
-      {:force? force?
-       :all? (nil? target)
-       :target target})))
+      (if target
+        {:force? force? :all? false :target target}
+        (if-let [cwd-project (shared/project-containing-dir projects cwd)]
+          {:force? force?
+           :all? false
+           :target (:board-name cwd-project)
+           :cwd-default? true}
+          {:force? force? :all? true})))))
 
 (defn select-projects [{:keys [all? target]} projects]
   (if all?
@@ -62,16 +69,20 @@
       {:board-name (:board-name project)
        :success? false})))
 
-(defn run-command! [repo-dir action args projects]
-  (let [{:keys [force? all?] :as options} (parse-action action args projects)
-        selected-projects (select-projects options projects)
-        results (mapv #(run-project! repo-dir action force? %) selected-projects)]
-    (if (every? :success? results) 0 1)))
+(defn run-command! [repo-dir action args projects cwd]
+  (let [{:keys [force? target cwd-default?] :as options} (parse-action action args projects cwd)
+        selected-projects (select-projects options projects)]
+    (when cwd-default?
+      (println (str "Running only " target
+                    " (current directory); run from the repo root for all boards.")))
+    (let [results (mapv #(run-project! repo-dir action force? %) selected-projects)]
+      (if (every? :success? results) 0 1))))
 
 (defn run! [command args]
   (try
     (let [repo-dir (shared/repo-dir)
-          projects (shared/discover-projects repo-dir)]
+          projects (shared/discover-projects repo-dir)
+          cwd (str (fs/cwd))]
       (case command
         "list" (if (empty? args)
                  (do
@@ -79,8 +90,8 @@
                      (println (board-line project)))
                    0)
                  (fail-with-projects! "list does not accept arguments." projects))
-        "build" (run-command! repo-dir "build" args projects)
-        "check" (run-command! repo-dir "check" args projects)
+        "build" (run-command! repo-dir "build" args projects cwd)
+        "check" (run-command! repo-dir "check" args projects cwd)
         (fail-with-projects!
          (str "Unknown command: " command)
          projects)))

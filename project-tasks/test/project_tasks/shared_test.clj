@@ -84,6 +84,46 @@
         (spit (fs/file (fs/path board ".kkh-skip")) "")
         (is (true? (:skip? (shared/project-from-dir root board))))))))
 
+(deftest project-containing-dir-picks-board-for-dir
+  (with-temp-tree
+    (fn [root]
+      (let [alpha (fs/path root "pcbs" "alpha")
+            beta (fs/path root "pcbs" "beta")]
+        (spit-board! alpha "alpha")
+        (spit-board! beta "beta")
+        (fs/create-dirs (fs/path alpha "datasheets"))
+        (let [projects (shared/discover-projects root)]
+          (is (= "pcbs/alpha"
+                 (:board-name (shared/project-containing-dir projects alpha))))
+          (is (= "pcbs/alpha"
+                 (:board-name (shared/project-containing-dir
+                               projects (fs/path alpha "datasheets")))))
+          (is (nil? (shared/project-containing-dir projects root)))
+          (is (nil? (shared/project-containing-dir projects (fs/path root "pcbs")))))))))
+
+(deftest project-containing-dir-prefers-deepest-project
+  (with-temp-tree
+    (fn [root]
+      (let [outer (fs/path root "pcbs" "alpha")
+            inner (fs/path outer "sub")]
+        (spit-board! outer "alpha")
+        (spit-board! inner "sub")
+        (let [projects (shared/discover-projects root)]
+          (is (= "pcbs/alpha/sub"
+                 (:board-name (shared/project-containing-dir projects inner))))
+          (is (= "pcbs/alpha"
+                 (:board-name (shared/project-containing-dir projects outer)))))))))
+
+(deftest project-containing-dir-ignores-sibling-name-prefix
+  (with-temp-tree
+    (fn [root]
+      (let [alpha (fs/path root "pcbs" "alpha")
+            alphabet (fs/path root "pcbs" "alphabet")]
+        (spit-board! alpha "alpha")
+        (fs/create-dirs alphabet)
+        (let [projects (shared/discover-projects root)]
+          (is (nil? (shared/project-containing-dir projects alphabet))))))))
+
 (deftest discover-projects-includes-skipped-boards
   (with-temp-tree
     (fn [root]

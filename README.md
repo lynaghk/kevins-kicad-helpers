@@ -54,9 +54,10 @@ The outputs are named with the date, git revision, and also indicate whether the
 This one command runs schematic DRC, PCB ERC, and custom analysis checks, then builds all of the output files required to place a JLCPCB assembly order.
 (Run `kkh check` if you want everything but the build.)
 Run `kkh list` to see the repo-relative board names you can pass to `kkh build <board>` or `kkh check <board>`.
+Run `kkh build` or `kkh check` from inside a board's folder and it operates on only that board.
 
 To retire a board without deleting it (e.g. an obsolete revision you want to keep browsable), create an empty `.kkh-skip` file in its directory.
-Argless `kkh build` and `kkh check` then leave that board alone, `kkh list` shows it as `(skipped)`, and naming it explicitly still builds it.
+Argless `kkh build` and `kkh check` then leave that board alone, `kkh list` shows it as `(skipped)`, and naming it explicitly (or running from its folder) still builds it.
 
 The build script also exposes the version string as a KiCad variable, so add `${KKH_VERSION_DATE}` to your PCB silkscreen to get the version in the output Gerber files.
 

@@ -137,6 +137,15 @@
       (fail! (str "No KiCad projects found under " repo-dir ".")))
     projects))
 
+(defn project-containing-dir
+  "Project whose :project-dir is dir or an ancestor of dir; the deepest match wins."
+  [projects dir]
+  (let [dir (fs/normalize (fs/absolutize dir))]
+    (->> projects
+         (filter #(fs/starts-with? dir (fs/normalize (fs/absolutize (:project-dir %)))))
+         (sort-by (comp count str :project-dir) >)
+         first)))
+
 (defn kicad-cli! [dir args]
   (shell! dir (into ["kicad-cli"] args)))
 
