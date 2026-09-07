@@ -137,6 +137,16 @@
       (fail! (str "No KiCad projects found under " repo-dir ".")))
     projects))
 
+(defn path-for-message
+  "path relative to base-dir when possible, else absolute."
+  [base-dir path]
+  (let [base-dir (fs/absolutize base-dir)
+        path (fs/absolutize path)]
+    (try
+      (str (fs/relativize base-dir path))
+      (catch Exception _
+        (str path)))))
+
 (defn project-containing-dir
   "Project whose :project-dir is dir or an ancestor of dir; the deepest match wins."
   [projects dir]

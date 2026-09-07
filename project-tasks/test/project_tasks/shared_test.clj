@@ -84,6 +84,14 @@
         (spit (fs/file (fs/path board ".kkh-skip")) "")
         (is (true? (:skip? (shared/project-from-dir root board))))))))
 
+(deftest path-for-message-relativizes-to-base-dir
+  (is (= "outputs/reports/pump-drc.rpt"
+         (shared/path-for-message "/repo/pcbs/pump"
+                                  "/repo/pcbs/pump/outputs/reports/pump-drc.rpt")))
+  (is (= "../backplane/outputs/reports/backplane-drc.rpt"
+         (shared/path-for-message "/repo/pcbs/pump"
+                                  "/repo/pcbs/backplane/outputs/reports/backplane-drc.rpt"))))
+
 (deftest project-containing-dir-picks-board-for-dir
   (with-temp-tree
     (fn [root]

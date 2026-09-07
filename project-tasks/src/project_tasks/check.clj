@@ -11,13 +11,16 @@
    :check-label check-label
    :report report})
 
+(defn check-failed-message [check-label report cwd]
+  (str check-label " failed. Report: " (shared/path-for-message cwd report)))
+
 (defn- kicad-check! [project-dir check-label report args]
   (let [{:keys [exit]} @(p/process (into ["kicad-cli"] args)
                                    {:dir (str project-dir)
                                     :out :string
                                     :err :string})]
     (when-not (zero? exit)
-      (shared/fail! (str check-label " failed.")
+      (shared/fail! (check-failed-message check-label report (fs/cwd))
                     (kicad-check-failure check-label report)))))
 
 (defn run! [repo-dir {:keys [project-dir project-file project-name schematic pcb]}]

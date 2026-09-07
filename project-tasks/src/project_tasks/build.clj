@@ -56,21 +56,13 @@
                      (take 3)
                      seq)})))
 
-(defn- path-for-message [repo-dir path]
-  (let [repo-dir (fs/absolutize repo-dir)
-        path (fs/absolutize path)]
-    (try
-      (str (fs/relativize repo-dir path))
-      (catch Exception _
-        (str path)))))
-
 (defn format-check-failure [repo-dir {:keys [board-name]} check-failure]
   (let [{:keys [check-label report]} check-failure
         {:keys [summary preview]} (report-details report)]
     (str "Could not build " board-name " because " check-label " failed.\n"
          "\n"
          "First errors from:\n"
-         "  " (path-for-message repo-dir report) "\n"
+         "  " (shared/path-for-message repo-dir report) "\n"
          (when summary
            (str "  " summary "\n"))
          "\n"
