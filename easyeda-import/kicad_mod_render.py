@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
@@ -195,23 +195,32 @@ class Circle:
 
 
 @dataclass
+class Poly:
+    points: list[tuple[float, float]]
+    width: float
+    filled: bool
+    side: str
+
+
+@dataclass
 class Footprint:
     name: str
     pads: list[Pad]
     silk_segs: list[Seg]
     silk_circles: list[Circle]
+    silk_polys: list[Poly] = field(default_factory=list)
 
     def has_back(self) -> bool:
         """Whether anything is drawn on the back (enables the flip view)."""
         return any(p.side in ("B", "*") for p in self.pads) or any(
-            e.side == "B" for e in (*self.silk_segs, *self.silk_circles)
+            e.side == "B" for e in (*self.silk_segs, *self.silk_circles, *self.silk_polys)
         )
 
 
 def _copper_side(layers: list[str]) -> str | None:
-    front = any(l == "F.Cu" or l.endswith("F.Cu") for l in layers)
-    back = any(l == "B.Cu" or l.endswith("B.Cu") for l in layers)
-    if any(l == "*.Cu" or l.endswith("*.Cu") for l in layers) or (front and back):
+    front = any(layer == "F.Cu" or layer.endswith("F.Cu") for layer in layers)
+    back = any(layer == "B.Cu" or layer.endswith("B.Cu") for layer in layers)
+    if any(layer == "*.Cu" or layer.endswith("*.Cu") for layer in layers) or (front and back):
         return "*"
     if front:
         return "F"
@@ -221,9 +230,9 @@ def _copper_side(layers: list[str]) -> str | None:
 
 
 def _silk_side(layers: list[str]) -> str | None:
-    if any(l == "F.SilkS" or l.endswith("F.SilkS") for l in layers):
+    if any(layer == "F.SilkS" or layer.endswith("F.SilkS") for layer in layers):
         return "F"
-    if any(l == "B.SilkS" or l.endswith("B.SilkS") for l in layers):
+    if any(layer == "B.SilkS" or layer.endswith("B.SilkS") for layer in layers):
         return "B"
     return None
 
@@ -290,6 +299,7 @@ def load_footprint(path: Path) -> Footprint:
     pads: list[Pad] = []
     silk_segs: list[Seg] = []
     silk_circles: list[Circle] = []
+    silk_polys: list[Poly] = []
 
     for node in root:
         if not isinstance(node, list) or not node:
@@ -339,7 +349,19 @@ def load_footprint(path: Path) -> Footprint:
             for (ax, ay), (bx, by) in zip(pts, pts[1:]):
                 silk_segs.append(Seg(ax, ay, bx, by, w, side))
 
-    return Footprint(name, pads, silk_segs, silk_circles)
+        elif head in ("fp_poly", "gr_poly"):
+            side = _silk_side(_layers_of(node))
+            pts = _find(node, "pts")
+            if side is None or not pts:
+                continue
+            points = [(_num(xy[1]), _num(xy[2])) for xy in _find_all(pts, "xy")]
+            if len(points) >= 3:
+                fill = _find(node, "fill")
+                silk_polys.append(
+                    Poly(points, _stroke_width(node), bool(fill and fill[1] in ("yes", "solid")), side)
+                )
+
+    return Footprint(name, pads, silk_segs, silk_circles, silk_polys)
 
 
 # --------------------------------------------------------------------------- #
@@ -469,6 +491,14 @@ def render_footprint(
         r = circ.r * s
         draw.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], outline=SILK, width=max(1, int(circ.width * s)))
 
+    for poly in fp.silk_polys:
+        if poly.side != want:
+            continue
+        points = [tf(x, y) for x, y in poly.points]
+        if poly.filled:
+            draw.polygon(points, fill=SILK)
+        draw.line([*points, points[0]], fill=SILK, width=max(1, int(poly.width * s)), joint="curve")
+
     return img.resize((width, height), Image.LANCZOS)
 
 
@@ -585,6 +615,9 @@ def bbox_extent(fp: Footprint) -> float:
         m = max(m, abs(sg.x1), abs(sg.y1), abs(sg.x2), abs(sg.y2))
     for c in fp.silk_circles:
         m = max(m, abs(c.cx) + c.r, abs(c.cy) + c.r)
+    for poly in fp.silk_polys:
+        for x, y in poly.points:
+            m = max(m, abs(x) + poly.width / 2, abs(y) + poly.width / 2)
     return m
 
 

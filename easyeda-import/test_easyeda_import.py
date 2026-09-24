@@ -120,6 +120,19 @@ THT_OVAL = """\
 )
 """
 
+# Pin-1 triangle from KiCad's SOT-323_SC-70 footprint.
+SOT323_MARKER = """\
+(footprint "SOT-323_SC-70"
+    (layer "F.Cu")
+    (fp_poly
+        (pts (xy -1.18 -0.16) (xy -1.04 0.03) (xy -1.32 0.03))
+        (stroke (width 0.12) (type solid))
+        (fill yes)
+        (layer "F.SilkS")
+    )
+)
+"""
+
 _TMP = Path(tempfile.mkdtemp(prefix="easyeda-test-"))
 
 
@@ -169,6 +182,19 @@ def test_through_hole_pads_on_both_sides():
     tht = _fp(THT_OVAL, "tht")
     assert all(p.side == "*" for p in tht.pads)
     assert tht.has_back()  # *.Cu pads + B.SilkS enable the flip view
+
+
+# --------------------------------------------------------------------------- #
+# polygons: the SOT-323 pin-1 marker must appear in the preview
+# --------------------------------------------------------------------------- #
+def test_sot323_pin_one_triangle_renders():
+    fp = _fp(SOT323_MARKER, "sot323_marker")
+    assert len(fp.silk_polys) == 1
+    assert fp.silk_polys[0].filled
+    assert R.bbox_extent(fp) >= 1.32
+    img = R.render_footprint(fp, 100, 400, 200, supersample=1)
+    assert img.getpixel((82, 98)) == R.SILK  # centre of the filled triangle
+    assert img.getpixel((82, 65)) == R.BG  # outside the triangle
 
 
 # --------------------------------------------------------------------------- #
