@@ -5,9 +5,8 @@
 ;;
 ;; Usage: download-jlcpcb-parts-database [output-file]
 ;;
-;; The source is the jlcparts project (https://github.com/yaqwsx/jlcparts), which publishes
-;; its ~5.7 GB sqlite database daily as a split zip archive (cache.z01, cache.z02, ..., cache.zip)
-;; because GitHub Pages cannot serve single files that large.
+;; @ The source is Bouni/kicad-jlcpcb-tools, which publishes its SQLite cache daily
+;; @ as numbered chunks of a ZIP archive (cache.sqlite3.zip.001, .002, ...).
 ;;
 ;; Output defaults to ./jlcpcb_parts.db.
 ;; The download and the build happen in a scratch directory under ${XDG_CACHE_HOME:-~/.cache};
@@ -28,7 +27,7 @@
          '[clojure.java.io :as io]
          '[clojure.string :as str])
 
-(def base-url "https://yaqwsx.github.io/jlcparts/data")
+(def base-url "https://bouni.github.io/kicad-jlcpcb-tools")
 
 ;; Single source of truth for unit parsing in the generated SQL.
 ;; Suffixes are canonical upstream (checked against the live data).
@@ -98,7 +97,7 @@
 (defn build-sql
   "The whole transform as one SQL string for the sqlite3 CLI on stdin."
   [{:keys [new-file generated-at]}]
-  (str "ATTACH DATABASE '" (sql-quote (str new-file)) "' AS out;\n\n"
+  (str ".bail on\nATTACH DATABASE '" (sql-quote (str new-file)) "' AS out;\n\n"
        (components-sql generated-at)
        "\n"
        (str/join "\n\n" (mapcat side-table-sql (family-specs)))
@@ -119,7 +118,6 @@ CREATE TABLE out.components (
     category      TEXT,      -- can be '' (blank upstream) for ~18% of parts
     subcategory   TEXT,
     package       TEXT,
-    joints        INTEGER,
     description   TEXT,
     datasheet     TEXT,
     manufacturer  TEXT,      -- manufacturer NAME, e.g. 'Texas Instruments'
@@ -134,43 +132,33 @@ CREATE TABLE out.components (
 );
 
 INSERT INTO out.components
-SELECT lcsc,
-       mfr AS mpn,
-       -- 1 = extended part (incurs per-BOM-line feeding fee at assembly);
-       -- 0 = basic/preferred, i.e. effectively fee-free. JLCPCB's basic and
-       -- preferred tiers are functionally the same for our purposes, so we
-       -- collapse both into a single \"extended\" boolean.
-       CASE WHEN library_type = 'base' OR preferred = 1 THEN 0 ELSE 1 END AS extended,
-       stock,
-       -- price is an upstream string of quantity tiers like
-       -- \"1-199:0.0189,200-599:0.0163,...\": qty range, colon, unit price.
-       -- first_tier is the first (smallest-quantity) tier, i.e. the highest
-       -- unit price you'd pay; a missing/malformed tier yields NULL (not a
-       -- bogus 0.0), and the REAL column affinity above cements the value
-       -- as a real number.
-       CASE WHEN first_tier LIKE '%:%'
-            THEN ROUND(CAST(substr(first_tier, instr(first_tier, ':') + 1) AS REAL), 3)
-            ELSE NULL END AS price,
-       category, subcategory, package, joints, description, datasheet, manufacturer,
-       CASE WHEN stock = 0 THEN date(last_on_stock, 'unixepoch') END AS last_on_stock,
-       -- Empty attribute objects become NULL so absence is queryable
-       -- (attributes IS NULL) and costs no storage.
-       NULLIF(NULLIF(attributes, ''), '{}')
-FROM (
-    SELECT lcsc, library_type, preferred, stock, last_on_stock, mfr, manufacturer,
-           category, subcategory, package, joints, description, datasheet, attributes,
-           CASE WHEN instr(price, ',') > 0
-                THEN substr(price, 1, instr(price, ',') - 1)
-                ELSE price END AS first_tier
-    FROM jlc_components
-    -- Parts currently in the JLCPCB catalog that are in stock now, or were in
-    -- stock within the year before this build. The upstream stock figure is
-    -- JLCPCB's own SMT warehouse; recently-stocked parts still carry prices and
-    -- are usually preorderable via Global Sourcing, so they stay queryable here.
-    WHERE present = 1
-      AND (stock > 0
-           OR last_on_stock > CAST(strftime('%s', '" (sql-quote generated-at) "', '-365 days') AS INTEGER))
-);
+SELECT c.lcsc,
+       c.mfr AS mpn,
+       CASE WHEN c.basic = 1 OR c.preferred = 1 THEN 0 ELSE 1 END AS extended,
+       c.stock,
+       -- @ The first JSON price tier is the smallest-quantity unit price.
+       CASE WHEN json_valid(c.price) THEN
+            CASE WHEN json_type(c.price, '$[0].price') IN ('integer', 'real')
+                 THEN ROUND(json_extract(c.price, '$[0].price'), 3) END
+       END AS price,
+       cat.category, cat.subcategory, c.package, c.description, c.datasheet, m.name,
+       CASE WHEN c.stock = 0 THEN date(c.last_on_stock, 'unixepoch') END,
+       -- @ Attributes can be an API array or a legacy object in the same cache.
+       NULLIF(CASE json_type(NULLIF(c.extra, ''), '$.attributes')
+         WHEN 'object' THEN json_extract(c.extra, '$.attributes')
+         WHEN 'array' THEN
+           (SELECT json_group_object(json_extract(a.value, '$.attribute_name_en'),
+                                     json_extract(a.value, '$.attribute_value_name'))
+            FROM json_each(c.extra, '$.attributes') a
+            WHERE json_extract(a.value, '$.attribute_name_en') IS NOT NULL)
+       END, '{}')
+FROM main.components c
+LEFT JOIN categories cat ON cat.id = c.category_id
+LEFT JOIN manufacturers m ON m.id = c.manufacturer_id
+-- @ Keep in-stock parts and parts stocked within the year before this build.
+WHERE c.stock > 0
+   OR c.last_on_stock > CAST(strftime('%s', '" (sql-quote generated-at) "', '-365 days') AS INTEGER);
+
 
 -- Indexes for the columns you actually filter / sort on.
 CREATE INDEX out.idx_cs_category ON components (category, subcategory);
@@ -203,7 +191,8 @@ CREATE INDEX out.idx_cs_manufacturer ON components (manufacturer);
        "CREATE TABLE out.meta (key TEXT PRIMARY KEY, value TEXT);\n"
        "INSERT INTO out.meta (key, value) VALUES\n"
        "  ('generated_at', '" (sql-quote generated-at) "'),\n"
-       "  ('source_url',   '" base-url "/cache.zip'),\n"
+       "  ('source_url',   '" base-url "/cache.sqlite3.zip.001'),\n"
+       "  ('source_snapshot_at', (SELECT strftime('%Y-%m-%dT%H:%M:%SZ', MAX(last_update), 'unixepoch') FROM main.components)),\n"
        "  ('row_count',    (SELECT CAST(COUNT(*) AS TEXT) FROM out.components));"))
 
 (defn family-specs
@@ -387,26 +376,24 @@ CREATE INDEX out.idx_cs_manufacturer ON components (manufacturer);
 ;; ---- imperative shell ----
 
 (defn discover-parts!
-  "The split archive is cache.z01 .. cache.zNN plus a final cache.zip; the part count
-  grows as the catalog grows, so probe with HEAD requests until the first 404,
-  summing the reported sizes so the confirmation can show real numbers."
+  "Read the published chunk count and sum the archive sizes for confirmation."
   []
   (println "Discovering archive parts...")
-  (loop [i 1 names [] total 0]
-    (let [nm (format "cache.z%02d" i)]
-      (if-let [size (head-size! nm)]
-        (recur (inc i) (conj names nm) (+ total size))
-        (if-let [zip-size (head-size! "cache.zip")]
-          {:part-names (conj names "cache.zip")
-           :total-bytes (+ total zip-size)}
-          (die! (str "cannot reach " base-url "/cache.zip")))))))
+  (let [resp (http/get (str base-url "/cache_chunk_num.txt"))
+        n (parse-long (str/trim (:body resp)))]
+    (when-not (and n (pos? n))
+      (die! "invalid cache_chunk_num.txt"))
+    (let [names (mapv #(format "cache.sqlite3.zip.%03d" %) (range 1 (inc n)))]
+      {:part-names names
+       :total-bytes (reduce + (map head-size! names))})))
 
 (defn head-size!
-  "Content-length of one archive part, or nil when it does not exist."
+  "Content-length of one required archive chunk."
   [nm]
   (let [resp (http/head (str base-url "/" nm) {:throw false})]
-    (when (= 200 (:status resp))
-      (or (some-> (get-in resp [:headers "content-length"]) parse-long) 0))))
+    (when-not (= 200 (:status resp))
+      (die! (str "cannot reach " base-url "/" nm " (HTTP " (:status resp) ")")))
+    (or (some-> (get-in resp [:headers "content-length"]) parse-long) 0)))
 
 (defn existing-db-meta!
   "-> nil when path does not exist; {:generated-at nil} when it exists but is not
@@ -450,10 +437,7 @@ CREATE INDEX out.idx_cs_manufacturer ON components (manufacturer);
         (die! (str "download failed: " url))))))
 
 (defn extract!
-  "Concatenate the parts in order (numbered parts first, cache.zip last) into the
-  whole archive, unzip, and validate; returns the raw database path.
-  unzip exits nonzero with warnings about the concatenated split archive but still
-  extracts it correctly, so ignore its exit code and validate the result instead."
+  "Concatenate numbered chunks into a ZIP, extract, and validate the database."
   [part-names work-dir]
   (println "Extracting...")
   (let [combined (fs/path work-dir "combined.zip")
@@ -463,10 +447,10 @@ CREATE INDEX out.idx_cs_manufacturer ON components (manufacturer);
         (io/copy (fs/file (fs/path work-dir nm)) out)))
     (doseq [nm part-names]
       (fs/delete (fs/path work-dir nm)))
-    (p/shell {:continue true} "unzip" "-q" "-o" (str combined) "-d" (str work-dir))
+    (p/shell "unzip" "-q" "-o" (str combined) "cache.sqlite3" "-d" (str work-dir))
     (fs/delete combined)
     (when-not (sqlite-file? raw-file)
-      (die! (str "the extracted file is not a SQLite database: " base-url "/cache.zip")))
+      (die! (str "the extracted file is not a SQLite database: " raw-file)))
     raw-file))
 
 (defn sqlite-file? [path]

@@ -101,7 +101,9 @@ Schematic and footprint libraries are created as `0_<project-name>` with the `0_
 ### kkh-download-jlcpcb-parts-database
 
 I design all of my boards to be assembled by JLCPCB, so it's *extremely* helpful to have a low-latency way to query their parts.
-This script downloads the [jlcparts](https://github.com/yaqwsx/jlcparts) daily JLCPCB parts sqlite database and consolidates everything into a `components` table and lots of indexes so that searching is fast.
+This script downloads the daily JLCPCB parts SQLite cache from [Bouni/kicad-jlcpcb-tools](https://github.com/Bouni/kicad-jlcpcb-tools) and consolidates everything into a `components` table and lots of indexes so that searching is fast.
+The database includes in-stock parts and parts stocked within the past year.
+The source does not provide reliable solder-joint counts, so the output has no `joints` column.
 It also parses resistor, capacitor, and inductor values into tables with SI-base-unit REAL columns, so parametric queries like `farads = 100e-9 AND voltage_v >= 16` work with plain SQL.
 
 https://github.com/user-attachments/assets/5b1b1c08-0cfe-4aba-8c3a-ec0e257e46ca
