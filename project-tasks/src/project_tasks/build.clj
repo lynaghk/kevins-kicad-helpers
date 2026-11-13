@@ -11,19 +11,23 @@
   (csv/read-csv (str/replace-first (slurp (str path)) "\uFEFF" "")))
 
 (defn filter-positions-to-bom!
-  "Drop rows from positions.csv for parts the BOM does not list, e.g. footprints
-  that only have the exclude-from-BOM fabrication attribute set (mounting holes).
-  The Fabrication Toolkit writes no bom.csv at all when every footprint is
-  excluded (nothing to assemble), so a missing file means an empty BOM."
+  "Keep placement rows for BOM parts and emit header-only assembly CSVs when
+  Fabrication Toolkit omits them for a board with nothing to assemble."
   [toolkit-outputs]
   (let [bom (fs/path toolkit-outputs "bom.csv")
-        in-bom (if (fs/exists? bom)
-                 (->> (read-csv bom)
-                      rest
-                      (into #{} (mapcat #(str/split (first %) #",\s*"))))
-                 #{})
+        bom-rows (if (fs/exists? bom)
+                   (read-csv bom)
+                   [["Designator" "Footprint" "Quantity" "Value" "LCSC Part #"]])
+        in-bom (into #{} (mapcat #(str/split (first %) #",\s*")) (rest bom-rows))
         positions (fs/path toolkit-outputs "positions.csv")
-        [header & rows] (read-csv positions)]
+        [header & rows] (cond
+                          (fs/exists? positions) (read-csv positions)
+                          (empty? in-bom) [["Designator" "Mid X" "Mid Y" "Rotation" "Layer"]]
+                          :else (shared/fail! "Fabrication Toolkit did not create positions.csv for a populated BOM."))]
+    (when-not (fs/exists? bom)
+      (with-open [writer (io/writer (fs/file bom))]
+        (.write writer "\uFEFF")
+        (csv/write-csv writer bom-rows)))
     (with-open [writer (io/writer (fs/file positions))]
       (.write writer "\uFEFF")
       (csv/write-csv writer (cons header (filter (comp in-bom first) rows))))))

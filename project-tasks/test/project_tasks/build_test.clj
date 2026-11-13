@@ -79,6 +79,28 @@
       (build/filter-positions-to-bom! root)
       (is (= [positions-header] (positions-lines root))))))
 
+(deftest assembly-free-outputs-have-both-csv-headers
+  (with-temp-tree
+    (fn [root]
+      (build/filter-positions-to-bom! root)
+      (is (= [positions-header] (positions-lines root)))
+      (is (= ["Designator,Footprint,Quantity,Value,LCSC Part #"]
+             (-> (slurp (str (fs/path root "bom.csv")))
+                 (str/replace-first "\uFEFF" "")
+                 str/split-lines)))
+      (let [outputs (mapv #(slurp (str (fs/path root %))) ["bom.csv" "positions.csv"])]
+        (build/filter-positions-to-bom! root)
+        (is (= outputs
+               (mapv #(slurp (str (fs/path root %))) ["bom.csv" "positions.csv"])))))))
+
+(deftest populated-bom-requires-placement-output
+  (with-temp-tree
+    (fn [root]
+      (spit (fs/file (fs/path root "bom.csv"))
+            "Designator,Footprint,Quantity,Value,LCSC Part #\r\nR1,R_0402,1,10k,C25744\r\n")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"positions.csv"
+                            (build/filter-positions-to-bom! root))))))
+
 (deftest kicad-check-failure-message-previews-report
   (with-temp-tree
     (fn [root]
