@@ -97,6 +97,8 @@ class Progress:
 # ===========================================================================
 def export_full_step(board_path, out_path, opts, prog):
     cmd = ["kicad-cli", "pcb", "export", "step", "--subst-models", "-f", "-o", out_path]
+    for definition in opts.define_var:
+        cmd += ["-D", definition]
     if opts.silkscreen:
         cmd.append("--include-silkscreen")
     if opts.soldermask:
@@ -539,6 +541,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input", help="input .kicad_pcb (exported via kicad-cli) or an already-exported .step file")
     ap.add_argument("-o", "--output", help="output .step (default: <input>.simplified.step)")
+    ap.add_argument(
+        "-D",
+        "--define-var",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="override or add a KiCad project variable (repeatable; PCB input only)",
+    )
     ap.add_argument(
         "--copper", dest="copper", action="store_true", help="include copper (tracks/pads/zones) from the board"
     )

@@ -142,6 +142,7 @@
     (shared/step-export!
      project-dir
      ["--keep-full"
+      "-D" version-var
       "-o" (str (fs/path outputs (str project-name ".simplified.step")))
       (str pcb)])
     ;; Fabrication Toolkit resolves text variables through pcbnew and has no
