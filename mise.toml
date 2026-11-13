@@ -1,4 +1,9 @@
+[tool_alias]
+clojure = "asdf:asdf-community/asdf-clojure"
+
 [tools]
+java = "temurin-25"
+clojure = "1.12.4.1618"
 "github:babashka/babashka" = "1.12.218"
 "github:weavejester/cljfmt" = "0.16.4"
 uv = "latest"

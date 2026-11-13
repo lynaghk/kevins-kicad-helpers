@@ -24,12 +24,10 @@ if ! command -v mise >/dev/null 2>&1; then
     exit 1
 fi
 
-# Load this repo's pinned toolchain into PATH. mise -C would also change the
-# working directory, and the tasks resolve the project from $PWD, so eval the
-# environment instead of exec-ing through mise.
+# @ Load KKH's toolchain without changing the consuming project's directory.
 mise trust "$KKH_REPO/mise.toml" >/dev/null 2>&1 || true
 mise -C "$KKH_REPO" install --quiet
-eval "$(mise -C "$KKH_REPO" env)"
+eval "$(mise -C "$KKH_REPO" env -s bash)"
 
 # Sibling shims (kicad-cli, fabrication-toolkit, ...) must be resolvable even
 # when the consumer's environment doesn't put this bin/ on PATH.

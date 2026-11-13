@@ -44,10 +44,14 @@ fi
 
 SCHEMATIC=$(realpath "$SCHEMATIC")
 
-# The analyzer lives alongside this script in ../analyzer. We run from inside it
-# so deps.edn, src paths, and the mise-managed tool versions all resolve.
 SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
-ANALYZER_DIR="$SCRIPT_DIR/../analyzer"
-cd "$ANALYZER_DIR"
+KKH_REPO=$(realpath "$SCRIPT_DIR/..")
+mise trust "$KKH_REPO/mise.toml" >/dev/null 2>&1 || true
+mise -C "$KKH_REPO" install --quiet
+eval "$(mise -C "$KKH_REPO" env -s bash)"
+export PATH="$SCRIPT_DIR:$PATH"
+export SCHEMATIC
+cd "$KKH_REPO/analyzer"
 
-exec mise exec -- clojure -M -e "(do (require 'kicad-analyzer.core) (kicad-analyzer.core/check-schematic! \"$SCHEMATIC\"))"
+# @ Pass the path as data, including spaces and Clojure string delimiters.
+exec clojure -M -e '(do (require (quote kicad-analyzer.core)) (kicad-analyzer.core/check-schematic! (System/getenv "SCHEMATIC")))'

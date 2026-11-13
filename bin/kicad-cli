@@ -21,8 +21,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 fi
 
 shim="$(realpath "$0")"
+mise_executable="$(command -v mise || true)"
+if [[ -n "${mise_executable}" ]]; then
+  mise_executable="$(realpath "${mise_executable}")"
+fi
 while IFS= read -r executable; do
-  if [[ "$(realpath "${executable}")" != "${shim}" ]]; then
+  resolved="$(realpath "${executable}")"
+  # @ Mise shims can resolve back to this wrapper instead of system KiCad.
+  if [[ "${resolved}" != "${shim}" && "${resolved}" != "${mise_executable}" ]]; then
     exec "${executable}" "$@"
   fi
 done < <(type -aP kicad-cli)
