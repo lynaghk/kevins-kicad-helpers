@@ -33,4 +33,9 @@ eval "$(mise -C "$KKH_REPO" env -s bash)"
 # when the consumer's environment doesn't put this bin/ on PATH.
 export PATH="$SCRIPT_DIR:$PATH"
 
+if [[ "${1:-}" == "setup-kicad-libraries" ]]; then
+    shift
+    exec uv run --frozen --project "$KKH_REPO/kicad-libraries" python "$KKH_REPO/kicad-libraries/setup_kicad_libraries.py" "$@"
+fi
+
 exec bb --classpath "$KKH_REPO/project-tasks/src" -m project-tasks.dispatch "$@"

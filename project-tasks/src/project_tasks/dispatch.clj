@@ -11,6 +11,7 @@
        "  kkh list\n"
        "  kkh check [board]\n"
        "  kkh build [board] [--force]\n"
+       "  kkh setup-kicad-libraries [--jlcpcb-version VERSION] [--yes]\n"
        "  kkh macos-opener install | status | uninstall\n"
        "\n"
        "check and build run every board unless one is named or the current directory is inside a board's folder.\n"
